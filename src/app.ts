@@ -82,7 +82,7 @@ app.use('/api/v1/exams/admin', ExamAdminRoutes);
 // সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস ও এআই মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
 app.use('/api/v1/finance', financeRoutes); 
-app.use('/api/v1/notifications', notificationsAdminRoutes); // <-- Admin Notifications (Campaigns)
+app.use('/api/v1/notifications/admin', notificationsAdminRoutes); // <-- Admin Notifications (FIXED)
 app.use('/api/v1/notifications', notificationRoutes); 
 app.use('/api/v1/monetization', monetizationRoutes); 
 app.use('/api/v1/history', historyRoutes); 
