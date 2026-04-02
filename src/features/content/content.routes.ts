@@ -27,8 +27,12 @@ router.post('/curriculum/manage', rbacGuard(['admin']), contentController.manage
 router.post('/comprehensions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.createComprehension);
 router.get('/comprehensions/search', rbacGuard(['admin', 'moderator', 'teacher']), contentController.searchComprehensions);
 
-// প্রশ্ন তৈরি, আপডেট এবং ডিলিট
+// প্রশ্ন তৈরি, বাল্ক আপলোড, আপডেট এবং ডিলিট
 router.post('/questions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.createQuestion);
+
+// নতুন: Bulk Insert রাউট (এটি /:id এর আগে থাকতে হবে)
+router.post('/questions/bulk', rbacGuard(['admin', 'moderator', 'teacher']), contentController.bulkCreateQuestions);
+
 router.put('/questions/:id', rbacGuard(['admin', 'moderator', 'teacher']), contentController.updateQuestion);
 router.delete('/questions/:id', rbacGuard(['admin', 'moderator']), contentController.deleteQuestion);
 

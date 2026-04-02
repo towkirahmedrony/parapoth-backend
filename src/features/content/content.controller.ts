@@ -46,6 +46,24 @@ export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => 
   sendResponse(res, { statusCode: 201, success: true, message: 'Question saved', data: newQuestion });
 });
 
+// নতুন: বাল্ক আপলোড কন্ট্রোলার
+export const bulkCreateQuestions = catchAsync(async (req: AuthReq, res: Response) => {
+  const { questions } = req.body;
+  
+  if (!questions || !Array.isArray(questions) || questions.length === 0) {
+    return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid payload: Questions array is required' });
+  }
+
+  // সব প্রশ্নে ক্রিয়েটরের আইডি যুক্ত করা হচ্ছে
+  const questionsWithCreator = questions.map((q: any) => ({
+    ...q,
+    created_by: req.user?.id
+  }));
+
+  const result = await contentService.saveBulkQuestions(questionsWithCreator);
+  sendResponse(res, { statusCode: 201, success: true, message: `${result.length} questions uploaded successfully`, data: result });
+});
+
 export const updateQuestion = catchAsync(async (req: Request, res: Response) => {
   const result = await contentService.updateQuestion(req.params.id, req.body);
   sendResponse(res, { statusCode: 200, success: true, message: 'Question updated', data: result });
