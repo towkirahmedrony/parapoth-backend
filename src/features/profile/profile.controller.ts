@@ -1,32 +1,45 @@
 import { Request, Response } from 'express';
 import { ProfileService } from './profile.service';
+import catchAsync from '../../lib/utils/catchAsync';
+import sendResponse from '../../lib/utils/response'; 
 
-export class ProfileController {
-  static async getPublicProfile(req: Request, res: Response) {
-    try {
-      const { id: targetId } = req.params;
-      
-      // আপনার auth middleware যদি req.user এ লগ-ইন করা ইউজারের ডাটা রাখে, তবে সেটা এখানে ধরতে পারবেন
-      // উদাহরণস্বরূপ: const currentUserId = req.user?.id;
-      // আপাতত header বা query থেকে নিচ্ছি টেস্ট করার সুবিধার্থে
-      const currentUserId = req.headers['x-user-id'] as string || undefined;
+export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
+  const profile = await ProfileService.getProfileById(req.user!.id);
+  sendResponse(res, 200, true, 'Profile retrieved', profile);
+});
 
-      if (!targetId) {
-        return res.status(400).json({ success: false, message: 'Profile ID is required' });
-      }
+export const updateProfile = catchAsync(async (req: Request, res: Response) => {
+  const updated = await ProfileService.updateProfile(req.user!.id, req.body);
+  sendResponse(res, 200, true, 'Profile updated successfully', updated);
+});
 
-      const profileData = await ProfileService.getPublicProfile(targetId, currentUserId);
-      
-      return res.status(200).json({
-        success: true,
-        data: profileData
-      });
-    } catch (error: any) {
-      console.error('Error in getPublicProfile:', error);
-      return res.status(500).json({ 
-        success: false, 
-        message: error.message || 'Failed to fetch public profile' 
-      });
-    }
-  }
-}
+export const getPublicProfile = catchAsync(async (req: Request, res: Response) => {
+  const { identifier } = req.params;
+  const profile = await ProfileService.getPublicProfile(identifier);
+  
+  const [badges, activity] = await Promise.all([
+    ProfileService.getUserBadges(profile.id),
+    ProfileService.getActivityStats(profile.id)
+  ]);
+
+  sendResponse(res, 200, true, 'Public profile fetched', {
+    ...profile,
+    badges,
+    activity
+  });
+});
+
+export const getVersusStats = catchAsync(async (req: Request, res: Response) => {
+  const myId = req.user!.id;
+  const opponentId = req.params.opponentId;
+
+  const [me, opponent] = await Promise.all([
+    ProfileService.getProfileById(myId),
+    ProfileService.getPublicProfile(opponentId)
+  ]);
+
+  sendResponse(res, 200, true, 'Versus stats fetched', {
+    me: { xp: me.total_xp, streak: me.current_streak, rating: me.pvp_rating },
+    opponent: { xp: opponent.total_xp, streak: opponent.current_streak, rating: opponent.pvp_rating }
+  });
+});

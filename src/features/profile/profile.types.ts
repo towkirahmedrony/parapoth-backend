@@ -1,36 +1,35 @@
-export interface PlayerStats {
-  total_xp: number;
-  accuracy: number;
-  current_streak: number;
-  total_exams: number;
-}
-
-export interface Badge {
+export interface UserProfile {
   id: string;
-  title: string;
-  icon_url: string | null;
-  is_earned: boolean;
+  username: string;
+  full_name: string;
+  avatar_url?: string;
+  bio?: string;
+  institution?: string;
+  class_level?: string;
+  group?: string;
+  education_board?: string;
+  batch_year?: string;
+  total_xp: number;
+  pvp_rating: number;
+  current_streak: number;
+  max_streak: number;
+  is_pro: boolean;
+  created_at: string;
 }
 
-export interface PublicProfileResponse {
-  profile: {
-    id: string;
-    username: string | null;
-    full_name: string;
-    avatar_url: string;
-    bio: string;
-    batch_year: string;
-    pvp_rating: number;
-    total_xp: number;
-    badges: Badge[];
-  };
-  versusStats: {
-    my_stats: PlayerStats;
-    their_stats: PlayerStats;
-  };
-  activityData: {
-    day: string;
-    you: number;
-    them: number;
-  }[];
+export interface UpdateProfileDto {
+  full_name?: string;
+  bio?: string;
+  avatar_url?: string;
+  institution?: string;
+  class_level?: string;
+  group?: string;
+  education_board?: string;
+  batch_year?: string;
+}
+
+export interface ActivityPoint {
+  day: string;
+  exams: number;
+  xp: number;
 }
