@@ -7,7 +7,7 @@ export class ExamUserService {
     const { topics, limit } = payload;
     const { data: questions, error } = await supabase
       .from('questions')
-      .select('*, media_library(*)') 
+      .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))') 
       .in('topic_id', topics)
       .eq('is_active', true)
       .limit(limit);
@@ -20,7 +20,7 @@ export class ExamUserService {
   static async getArenaQuestions(limit: number) {
     const { data, error } = await supabase
       .from('questions')
-      .select('*, media_library(*), comprehension:comprehension_id(*)')
+      .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
       .eq('is_active', true)
       .limit(limit);
 
@@ -115,7 +115,7 @@ export class ExamUserService {
   static async createGroupBattleExam(challengerId: string, opponentId: string, examData: any) {
     // ১. নিজেকে নিজে চ্যালেঞ্জ দেওয়া চেক
     if (challengerId === opponentId) {
-      throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন না!');
+      throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন চিহ্নিত করা যাচ্ছে না!');
     }
 
     // ২. Service Role Key ব্যবহার করে RLS বাইপাস করে ইনসার্ট

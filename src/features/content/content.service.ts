@@ -290,3 +290,21 @@ export const refreshSearchIndex = async (type: 'vector' | 'global'): Promise<boo
   if (error) throw new Error(error.message);
   return true;
 };
+
+export const saveBulkQuestions = async (questionsData: QuestionPayload[]) => {
+  const BATCH_SIZE = 500;
+  let allInsertedData: any[] = [];
+
+  for (let i = 0; i < questionsData.length; i += BATCH_SIZE) {
+    const chunk = questionsData.slice(i, i + BATCH_SIZE);
+    const { data, error } = await supabase
+      .from('questions')
+      .insert(chunk)
+      .select();
+
+    if (error) throw new Error(error.message);
+    if (data) allInsertedData.push(...data);
+  }
+
+  return allInsertedData;
+};
