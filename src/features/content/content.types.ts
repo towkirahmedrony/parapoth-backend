@@ -26,16 +26,17 @@ export interface QuestionPayload {
   type: string;
   difficulty_level: string;
   source_type?: string | null;
-  body: Record<string, any>; // This contains text and nested video object
+  body: Record<string, any>;
   options: Record<string, any>[];
   explanation?: string;
   media_id?: string | null;
   explanation_media_id?: string | null;
   tags?: string[];
   exam_references?: Record<string, any>[];
-  status: 'draft' | 'review' | 'approved' | 'rejected' | 'published' | 'deleted';
+  status: 'draft' | 'review' | 'approved' | 'rejected' | 'published' | 'deleted' | 'flagged' | 'pending';
   created_by?: string;
   is_embedding_stale?: boolean;
+  confidence_score?: number; // Added for Audit
 }
 
 export interface ComprehensionPayload {
@@ -48,4 +49,12 @@ export interface ComprehensionPayload {
 
 export interface SyncIndexPayload {
   type: 'vector' | 'global';
+}
+
+// Added for Audit filtering
+export interface AuditFilterParams {
+  status?: string;
+  difficulty?: string;
+  subject_id?: string;
+  search?: string;
 }

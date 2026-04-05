@@ -21,14 +21,14 @@ import { ExamAdminRoutes } from './features/exams/exams.admin.routes';
 import systemRoutes from './features/system/system.routes'; 
 import { financeRoutes } from './features/finance/finance.routes';
 import notificationRoutes from './features/notifications/notifications.routes';
-import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; // <-- Admin Notifications
+import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; 
 import historyRoutes from './features/history/history.routes'; 
 
 // মনিটাইজেশন, প্রগ্রেস, এআই এবং গ্রোথ (স্ট্রিক) রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
-import progressRoutes from './features/progress/progress.routes'; // <-- Progress রাউট ইম্পোর্ট
-import aiRoutes from './features/ai/ai.routes'; // <-- AI রাউট ইম্পোর্ট
-import growthRoutes from './features/growth/streak.routes'; // <-- Growth/Streak রাউট ইম্পোর্ট
+import progressRoutes from './features/progress/progress.routes'; 
+import aiRoutes from './features/ai/ai.routes'; 
+import growthRoutes from './features/growth/streak.routes'; 
 
 dotenv.config();
 
@@ -68,6 +68,10 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/api/v1/auth', authRoutes); 
 app.use('/api/v1/profiles', profileRoutes);
 app.use('/api/v1/content', contentRoutes);
+
+// ✅ FIXED: Frontend এর এডমিন প্যানেল রিকোয়েস্ট হ্যান্ডেল করার জন্য রাউট অ্যাড করা হলো
+app.use('/api/v1/admin/content', contentRoutes);
+
 app.use('/api/v1/community/admin', communityAdminRoutes);
 app.use('/api/v1/community/user', communityUserRoutes);
 app.use('/api/v1/dashboard', dashboardAdminRoutes);
@@ -82,13 +86,13 @@ app.use('/api/v1/exams/admin', ExamAdminRoutes);
 // সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস ও এআই মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
 app.use('/api/v1/finance', financeRoutes); 
-app.use('/api/v1/notifications/admin', notificationsAdminRoutes); // <-- Admin Notifications (FIXED)
+app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
 app.use('/api/v1/notifications', notificationRoutes); 
 app.use('/api/v1/monetization', monetizationRoutes); 
 app.use('/api/v1/history', historyRoutes); 
-app.use('/api/v1/progress', progressRoutes); // <-- Progress মডিউল কানেক্ট করা হলো
-app.use('/api/v1/ai', aiRoutes); // <-- AI রাউট কানেক্ট করা হলো
-app.use('/api/v1/growth', growthRoutes); // <-- Growth/Streak রাউট কানেক্ট করা হলো
+app.use('/api/v1/progress', progressRoutes); 
+app.use('/api/v1/ai', aiRoutes); 
+app.use('/api/v1/growth', growthRoutes); 
 
 // Frontend API কলের সাথে মেলানোর জন্য এডমিন প্রোফাইল রাউট
 app.use('/api/v1/admin/profile', adminProfileRoutes);
