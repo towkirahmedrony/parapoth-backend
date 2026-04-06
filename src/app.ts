@@ -1,6 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser'; // 👈 কুকি-পার্সার ইম্পোর্ট করা হলো
 
 // রাউট ইম্পোর্ট
 import authRoutes from './features/auth/auth.routes';
@@ -39,7 +40,8 @@ const allowedOrigins = [
   process.env.CLIENT_URL,
   'http://localhost:5173', 
   'http://localhost:5174',
-  'http://127.0.0.1:5174'
+  'http://127.0.0.1:5174',
+  'https://parapoth-studio.web.app' // ✅ ডোমেইন
 ].filter(Boolean) as string[];
 
 // Global Middlewares
@@ -51,10 +53,11 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true // 👈 এটি true না থাকলে ক্লায়েন্ট থেকে কুকি আসবে না
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser()); // 👈 Trusted Device কুকি রিড করার জন্য গ্লোবাল মিডলওয়্যার হিসেবে অ্যাড করা হলো
 
 // Health Check Route
 app.get('/health', (req: Request, res: Response) => {
@@ -68,10 +71,7 @@ app.get('/health', (req: Request, res: Response) => {
 app.use('/api/v1/auth', authRoutes); 
 app.use('/api/v1/profiles', profileRoutes);
 app.use('/api/v1/content', contentRoutes);
-
-// ✅ FIXED: Frontend এর এডমিন প্যানেল রিকোয়েস্ট হ্যান্ডেল করার জন্য রাউট অ্যাড করা হলো
 app.use('/api/v1/admin/content', contentRoutes);
-
 app.use('/api/v1/community/admin', communityAdminRoutes);
 app.use('/api/v1/community/user', communityUserRoutes);
 app.use('/api/v1/dashboard', dashboardAdminRoutes);
@@ -114,7 +114,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-// Global Error Handler (catchAsync এর Error গুলো এখানে আসবে)
+// Global Error Handler
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   console.error('🔥 [Global Error]:', err);
   
