@@ -4,17 +4,19 @@ import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
 
 const router = Router();
-
 router.use(requireAuth, rbacGuard(['admin'])); 
 
-// Campaigns (notifications table)
+// Campaigns
 router.post('/campaigns', NotificationAdminController.createCampaign);
 router.get('/campaigns', NotificationAdminController.getCampaigns);
+router.put('/campaigns/:id', NotificationAdminController.updateCampaign); // NEW: Edit
 router.patch('/campaigns/:id/cancel', NotificationAdminController.cancelCampaign);
+router.delete('/campaigns/:id', NotificationAdminController.deleteCampaign); // NEW: Delete
 
-// Notices (notices table)
+// Notices
 router.post('/notices', NotificationAdminController.createNotice);
 router.get('/notices', NotificationAdminController.getNotices);
-router.delete('/notices/:id', NotificationAdminController.deleteNotice);
+router.put('/notices/:id', NotificationAdminController.updateNotice); // NEW: Edit
+router.delete('/notices/:id', NotificationAdminController.deleteNotice); // DELETE
 
 export default router;
