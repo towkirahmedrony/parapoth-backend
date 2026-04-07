@@ -38,7 +38,15 @@ export const reorderHomeGrids = async (reorderPayload: { id: string, serial_orde
 // Global Configs & Remote Controls
 // ==========================================
 export const getGlobalConfigs = async () => {
-  const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config']);
+  // daily_quote কী-টি এখানে যোগ করা হলো
+  const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config', 'daily_quote']);
+  if (error) throw error;
+  return data;
+};
+
+// নির্দিষ্ট একটি কী দিয়ে কনফিগ আনার ফাংশন
+export const getAppConfigByKey = async (key: string) => {
+  const { data, error } = await supabase.from('app_configs').select('*').eq('key', key).maybeSingle();
   if (error) throw error;
   return data;
 };
@@ -134,25 +142,12 @@ export const resolveAdminAlert = async (id: string, adminId: string) => {
 // Global Notice (Merged from Admin System)
 // ==========================================
 export const updateGlobalNotice = async (noticeData: any) => {
-  // প্রথমে আপডেট করার চেষ্টা করবে
   const { data, error } = await supabase
     .from('app_configs')
-    .update({ value: noticeData })
-    .eq('key', 'global_notice')
+    .upsert({ key: 'global_notice', value: noticeData }, { onConflict: 'key' })
     .select()
     .single();
 
-  if (error) {
-    // যদি আগে থেকে না থাকে, তাহলে ইনসার্ট করবে
-    const insertRes = await supabase
-      .from('app_configs')
-      .insert({ key: 'global_notice', value: noticeData })
-      .select()
-      .single();
-      
-    if (insertRes.error) throw new Error(insertRes.error.message);
-    return insertRes.data;
-  }
-  
+  if (error) throw error;
   return data;
 };

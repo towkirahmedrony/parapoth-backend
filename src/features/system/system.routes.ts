@@ -7,15 +7,16 @@ const router = Router();
 
 // ==========================================
 // Publicly accessible configurations
-// (সাধারণ ইউজারদের অ্যাপ লোড হওয়ার সময় এগুলো লাগবে)
 // ==========================================
 router.get('/home-grids', SystemController.getHomeGrids);
 router.get('/theme-config', SystemController.getThemeConfig);
-router.get('/configs', SystemController.getAppConfigs); // <-- এটিকে পাবলিক করা হলো
+
+// সব কনফিগ বা নির্দিষ্ট কী দিয়ে কনফিগ আনা
+router.get('/configs', SystemController.getAppConfigs);
+router.get('/configs/:key', SystemController.getAppConfigs);
 
 // ==========================================
 // Admin guarded routes
-// (শুধুমাত্র অ্যাডমিনরা এই কাজগুলো করতে পারবে)
 // ==========================================
 const adminGuard = [requireAuth, rbacGuard(['admin', 'super_admin'])];
 
@@ -25,8 +26,9 @@ router.post('/home-grids', adminGuard, SystemController.upsertHomeGrid);
 router.patch('/home-grids/reorder', adminGuard, SystemController.reorderHomeGrids);
 router.delete('/home-grids/:id', adminGuard, SystemController.deleteHomeGrid);
 
-// কনফিগ সেভ করার অধিকার শুধু অ্যাডমিনের
+// কনফিগ আপডেট (বডি বা URL থেকে কী নিবে)
 router.put('/configs', adminGuard, SystemController.updateAppConfig);
+router.post('/configs/:key', adminGuard, SystemController.updateAppConfig); // Admin panel POST /configs/daily_quote এর জন্য
 
 router.get('/emergency-flags', adminGuard, SystemController.getEmergencyFlags);
 router.post('/emergency-flags', adminGuard, SystemController.createEmergencyFlag);
