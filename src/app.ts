@@ -1,7 +1,7 @@
 import express, { Application, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import cookieParser from 'cookie-parser'; // 👈 কুকি-পার্সার ইম্পোর্ট করা হলো
+import cookieParser from 'cookie-parser';
 
 // রাউট ইম্পোর্ট
 import authRoutes from './features/auth/auth.routes';
@@ -25,11 +25,12 @@ import notificationRoutes from './features/notifications/notifications.routes';
 import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; 
 import historyRoutes from './features/history/history.routes'; 
 
-// মনিটাইজেশন, প্রগ্রেস, এআই এবং গ্রোথ (স্ট্রিক) রাউট ইম্পোর্ট
+// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ এবং কন্টাক্ট রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
 import growthRoutes from './features/growth/streak.routes'; 
+import { contactRoutes } from './features/contact/contact.routes'; // 👈 কন্টাক্ট রাউট ইম্পোর্ট করা হলো
 
 dotenv.config();
 
@@ -41,7 +42,7 @@ const allowedOrigins = [
   'http://localhost:5173', 
   'http://localhost:5174',
   'http://127.0.0.1:5174',
-  'https://parapoth-studio.web.app' // ✅ ডোমেইন
+  'https://parapoth-studio.web.app'
 ].filter(Boolean) as string[];
 
 // Global Middlewares
@@ -53,11 +54,11 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true // 👈 এটি true না থাকলে ক্লায়েন্ট থেকে কুকি আসবে না
+  credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser()); // 👈 Trusted Device কুকি রিড করার জন্য গ্লোবাল মিডলওয়্যার হিসেবে অ্যাড করা হলো
+app.use(cookieParser());
 
 // Health Check Route
 app.get('/health', (req: Request, res: Response) => {
@@ -93,11 +94,10 @@ app.use('/api/v1/history', historyRoutes);
 app.use('/api/v1/progress', progressRoutes); 
 app.use('/api/v1/ai', aiRoutes); 
 app.use('/api/v1/growth', growthRoutes); 
+app.use('/api/v1/contact', contactRoutes); // 👈 কন্টাক্ট মডিউল রেজিস্টার করা হলো
 
-// Frontend API কলের সাথে মেলানোর জন্য এডমিন প্রোফাইল রাউট
+// Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
-
-// User Management (Admin 360 View) রাউট কানেক্ট করা হলো
 app.use('/api/v1/admin/users', usersAdminRoutes);
 
 // Frontend Compatibility Routes 
