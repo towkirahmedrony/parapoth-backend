@@ -25,12 +25,13 @@ import notificationRoutes from './features/notifications/notifications.routes';
 import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; 
 import historyRoutes from './features/history/history.routes'; 
 
-// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ এবং কন্টাক্ট রাউট ইম্পোর্ট
+// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট এবং রিপোর্ট রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
 import growthRoutes from './features/growth/streak.routes'; 
-import { contactRoutes } from './features/contact/contact.routes'; // 👈 কন্টাক্ট রাউট ইম্পোর্ট করা হলো
+import { contactRoutes } from './features/contact/contact.routes';
+import reportRoutes from './features/reports/reports.routes'; // 👈 রিপোর্ট রাউট ইম্পোর্ট করা হলো
 
 dotenv.config();
 
@@ -84,7 +85,7 @@ app.use('/api/v1/leaderboard', leaderboardRoutes);
 app.use('/api/v1/exams/user', ExamUserRoutes);
 app.use('/api/v1/exams/admin', ExamAdminRoutes);
 
-// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস ও এআই মডিউল রাউট
+// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, কন্টাক্ট ও রিপোর্ট মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
 app.use('/api/v1/finance', financeRoutes); 
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
@@ -94,7 +95,8 @@ app.use('/api/v1/history', historyRoutes);
 app.use('/api/v1/progress', progressRoutes); 
 app.use('/api/v1/ai', aiRoutes); 
 app.use('/api/v1/growth', growthRoutes); 
-app.use('/api/v1/contact', contactRoutes); // 👈 কন্টাক্ট মডিউল রেজিস্টার করা হলো
+app.use('/api/v1/contact', contactRoutes);
+app.use('/api/v1/reports', reportRoutes); // 👈 রিপোর্ট মডিউল রেজিস্টার করা হলো
 
 // Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
