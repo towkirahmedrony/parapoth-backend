@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
+import { messaging } from '../../config/firebaseAdmin';
 import { IMarkReadPayload, IDeviceTokenPayload } from './notifications.types';
 
 export const getUserNotifications = async (userId: string) => {
@@ -51,6 +52,44 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
 };
 
 // ==========================================
+// FCM Web Push Notification Function
+// ==========================================
+export const sendPushNotification = async (userId: string, title: string, body: string, imageUrl?: string, actionLink?: string) => {
+  try {
+    const { data: userDevices, error } = await supabaseAdmin
+      .from('user_devices')
+      .select('fcm_token')
+      .eq('user_id', userId)
+      .not('fcm_token', 'is', null);
+
+    if (error || !userDevices || userDevices.length === 0) return;
+
+    const tokens = userDevices.map(device => device.fcm_token);
+
+    const message = {
+      notification: {
+        title: title,
+        body: body,
+      },
+      webpush: {
+        headers: {
+          image: imageUrl || ''
+        },
+        fcm_options: {
+          link: actionLink || '/'
+        }
+      },
+      tokens: tokens
+    };
+
+    const response = await messaging.sendEachForMulticast(message);
+    console.log(`FCM Push Sent: ${response.successCount} success, ${response.failureCount} failed.`);
+  } catch (err) {
+    console.error('FCM Push Notification Error:', err);
+  }
+};
+
+// ==========================================
 // Automated System Notification Helper
 // ==========================================
 export const sendRewardNotification = async (userId: string, title: string, body: string, coins: number = 0, xp: number = 0) => {
@@ -71,7 +110,14 @@ export const sendRewardNotification = async (userId: string, title: string, body
       meta_data: metadata
     });
 
-    if (error) console.error('❌ Failed to send reward notification:', error);
+    if (error) {
+      console.error('❌ Failed to send reward notification to DB:', error);
+      return; 
+    }
+
+    // Call Web Push Notification
+    await sendPushNotification(userId, title, body, "https://parapoth.com/icons/reward.webp", "/profile");
+
   } catch (err) {
     console.error('❌ Notification Exception:', err);
   }
