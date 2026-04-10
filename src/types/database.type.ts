@@ -1698,6 +1698,39 @@ export type Database = {
           },
         ]
       }
+      levels_master: {
+        Row: {
+          badge_url: string | null
+          created_at: string | null
+          id: number
+          max_xp: number | null
+          min_xp: number
+          name_bn: string
+          name_en: string
+          updated_at: string | null
+        }
+        Insert: {
+          badge_url?: string | null
+          created_at?: string | null
+          id: number
+          max_xp?: number | null
+          min_xp: number
+          name_bn: string
+          name_en: string
+          updated_at?: string | null
+        }
+        Update: {
+          badge_url?: string | null
+          created_at?: string | null
+          id?: number
+          max_xp?: number | null
+          min_xp?: number
+          name_bn?: string
+          name_en?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       media_library: {
         Row: {
           cloud_provider_id: string | null
@@ -2198,6 +2231,7 @@ export type Database = {
           deletion_requested_at: string | null
           education_board: string | null
           email: string | null
+          freezes_left: number | null
           full_name: string | null
           gender: string | null
           group: string | null
@@ -2244,6 +2278,7 @@ export type Database = {
           deletion_requested_at?: string | null
           education_board?: string | null
           email?: string | null
+          freezes_left?: number | null
           full_name?: string | null
           gender?: string | null
           group?: string | null
@@ -2290,6 +2325,7 @@ export type Database = {
           deletion_requested_at?: string | null
           education_board?: string | null
           email?: string | null
+          freezes_left?: number | null
           full_name?: string | null
           gender?: string | null
           group?: string | null
@@ -3041,6 +3077,7 @@ export type Database = {
           id: string
           study_time_minutes: number
           updated_at: string
+          used_freeze: boolean | null
           user_id: string
           xp_earned: number
         }
@@ -3052,6 +3089,7 @@ export type Database = {
           id?: string
           study_time_minutes?: number
           updated_at?: string
+          used_freeze?: boolean | null
           user_id: string
           xp_earned?: number
         }
@@ -3063,6 +3101,7 @@ export type Database = {
           id?: string
           study_time_minutes?: number
           updated_at?: string
+          used_freeze?: boolean | null
           user_id?: string
           xp_earned?: number
         }
@@ -3517,6 +3556,50 @@ export type Database = {
           other_id: string
           similarity: number
         }[]
+      }
+      get_adaptive_random_questions: {
+        Args: { p_limit: number; p_user_id: string }
+        Returns: {
+          approved_at: string | null
+          approved_by: string | null
+          avg_time_spent: number | null
+          body: Json
+          chapter_id: string | null
+          comprehension_id: string | null
+          confidence_score: number | null
+          correct_attempts: number | null
+          created_at: string | null
+          created_by: string | null
+          deleted_at: string | null
+          difficulty_level: string | null
+          embedding: string | null
+          embedding_updated_at: string | null
+          embedding_version: string | null
+          exam_references: Json | null
+          explanation: string | null
+          explanation_media_id: string | null
+          id: string
+          is_active: boolean | null
+          is_embedding_stale: boolean | null
+          media_id: string | null
+          options: Json | null
+          revision: number | null
+          search_vector: unknown
+          source_type: string | null
+          status: string | null
+          subject_id: string | null
+          tags: string[] | null
+          topic_id: string | null
+          total_attempts: number | null
+          type: string
+          updated_at: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "questions"
+          isOneToOne: false
+          isSetofReturn: true
+        }
       }
       get_current_streak: { Args: { p_user_id: string }; Returns: number }
       get_current_user_id: { Args: never; Returns: string }

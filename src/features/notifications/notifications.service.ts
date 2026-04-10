@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase';
+import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { IMarkReadPayload, IDeviceTokenPayload } from './notifications.types';
 
 export const getUserNotifications = async (userId: string) => {
@@ -47,4 +48,31 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
 
   if (error) throw error;
   return data;
+};
+
+// ==========================================
+// Automated System Notification Helper
+// ==========================================
+export const sendRewardNotification = async (userId: string, title: string, body: string, coins: number = 0, xp: number = 0) => {
+  try {
+    let metadata = {};
+    if (coins > 0 || xp > 0) {
+      metadata = { reward: { coins, xp } };
+    }
+
+    const { error } = await supabaseAdmin.from('notifications').insert({
+      target_user_id: userId,
+      title_en: title,
+      title_bn: title,
+      body_en: body,
+      body_bn: body,
+      type: 'reward', // স্পেশাল টাইপ যা ফ্রন্টএন্ডে গিফট আইকন দেখাতে সাহায্য করবে
+      channel: 'in_app',
+      meta_data: metadata
+    });
+
+    if (error) console.error('❌ Failed to send reward notification:', error);
+  } catch (err) {
+    console.error('❌ Notification Exception:', err);
+  }
 };

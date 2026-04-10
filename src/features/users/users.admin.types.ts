@@ -1,4 +1,4 @@
-import type { Database } from '../../types/database.types';
+import type { Database } from '../../types/database.type';
 
 export type UserProfile = Database['public']['Tables']['profiles']['Row'];
 export type Device = Database['public']['Tables']['user_devices']['Row'];

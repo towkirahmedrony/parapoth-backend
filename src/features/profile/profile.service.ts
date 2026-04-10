@@ -1,89 +1,67 @@
 import { supabase } from '../../config/supabase';
+import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { UpdateProfileDto, UserProfile } from './profile.types';
+import { sendRewardNotification } from '../notifications/notifications.service';
 
 export class ProfileService {
-  // নিজের প্রোফাইল ডাটা ফেচ করা
   static async getProfileById(userId: string): Promise<UserProfile> {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw new Error('Profile not found');
     return data;
   }
 
-  // প্রোফাইল আপডেট করা
   static async updateProfile(userId: string, data: UpdateProfileDto) {
-    const { data: updated, error } = await supabase
-      .from('profiles')
-      .update(data)
-      .eq('id', userId)
-      .select()
-      .single();
-
+    const { data: oldProfile } = await supabase.from('profiles').select('avatar_url, institution').eq('id', userId).single();
+    const { data: updated, error } = await supabase.from('profiles').update(data).eq('id', userId).select().single();
     if (error) throw new Error(error.message);
+
+    if (oldProfile && updated) {
+      const wasIncomplete = !oldProfile.avatar_url || !oldProfile.institution;
+      const isNowComplete = updated.avatar_url && updated.institution;
+
+      if (wasIncomplete && isNowComplete) {
+        const { data: configData } = await supabaseAdmin.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
+        const xpReward = (configData?.value as any)?.profile_completion || 50;
+        
+        const { error: xpErr } = await supabaseAdmin.rpc('update_user_progress', { p_user_id: userId, p_coins: 0, p_xp: xpReward });
+        if (!xpErr) {
+          await sendRewardNotification(userId, 'প্রোফাইল সম্পন্ন হয়েছে! 🎉', `আপনার প্রোফাইলে ছবি এবং শিক্ষাপ্রতিষ্ঠানের নাম যুক্ত করার জন্য আপনি পেয়েছেন ${xpReward} XP!`, 0, xpReward);
+        }
+      }
+    }
     return updated;
   }
 
-  // পাবলিক প্রোফাইল (ইউজারনেম বা আইডি দিয়ে সার্চ)
   static async getPublicProfile(identifier: string) {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier);
+    let query = supabase.from('profiles').select('id, username, full_name, avatar_url, bio, total_xp, pvp_rating, current_streak, batch_year');
+    if (isUUID) query = query.eq('id', identifier);
+    else query = query.eq('username', identifier);
     
-    let query = supabase
-      .from('profiles')
-      .select('id, username, full_name, avatar_url, bio, total_xp, pvp_rating, current_streak, batch_year');
-
-    if (isUUID) {
-      query = query.eq('id', identifier);
-    } else {
-      query = query.eq('username', identifier);
-    }
-
     const { data, error } = await query.single();
     if (error) throw new Error('User not found');
     return data;
   }
 
-  // অর্জিত ব্যাজসমূহ
   static async getUserBadges(userId: string) {
-    const { data, error } = await supabase
-      .from('user_badges')
-      .select(`
-        earned_at,
-        badge:achievements_master (id, title, description, icon_url, rarity)
-      `)
-      .eq('user_id', userId);
-
+    const { data, error } = await supabase.from('user_badges').select(`earned_at, badge:achievements_master (id, title, description, icon_url, rarity)`).eq('user_id', userId);
     if (error) throw error;
     return data;
   }
 
-  // লাস্ট ৭ দিনের অ্যাক্টিভিটি ডাটা (Chart এর জন্য)
   static async getActivityStats(userId: string) {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-    const { data, error } = await supabase
-      .from('exam_history')
-      .select('created_at, earned_xp')
-      .eq('user_id', userId)
-      .gte('created_at', sevenDaysAgo.toISOString());
-
+    const { data, error } = await supabase.from('exam_history').select('created_at, earned_xp').eq('user_id', userId).gte('created_at', sevenDaysAgo.toISOString());
     if (error) throw error;
 
-    // ডাটা গ্রুপিং লজিক (Day-wise)
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     const stats = days.map(day => ({ day, exams: 0, xp: 0 }));
 
     data.forEach((entry: any) => {
       const dayName = days[new Date(entry.created_at).getDay()];
       const dayObj = stats.find(s => s.day === dayName);
-      if (dayObj) {
-        dayObj.exams += 1;
-        dayObj.xp += entry.earned_xp || 0;
-      }
+      if (dayObj) { dayObj.exams += 1; dayObj.xp += entry.earned_xp || 0; }
     });
 
     return stats;
