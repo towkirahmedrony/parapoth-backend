@@ -28,7 +28,10 @@ router.delete('/home-grids/:id', adminGuard, SystemController.deleteHomeGrid);
 
 // কনফিগ আপডেট (বডি বা URL থেকে কী নিবে)
 router.put('/configs', adminGuard, SystemController.updateAppConfig);
-router.post('/configs/:key', adminGuard, SystemController.updateAppConfig); // Admin panel POST /configs/daily_quote এর জন্য
+router.post('/configs/:key', adminGuard, SystemController.updateAppConfig);
+
+// XP Rules specific route
+router.put('/xp-rules', adminGuard, SystemController.updateXPRules);
 
 router.get('/emergency-flags', adminGuard, SystemController.getEmergencyFlags);
 router.post('/emergency-flags', adminGuard, SystemController.createEmergencyFlag);

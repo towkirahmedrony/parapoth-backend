@@ -6,7 +6,7 @@ import speakeasy from 'speakeasy';
 import nodemailer from 'nodemailer';
 import { supabase } from '../../config/supabase';
 
-// ... (requestAdminOTP code remains same) ...
+// ... (requestAdminOTP code) ...
 export const requestAdminOTP = catchAsync(async (req: Request, res: Response) => {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -66,19 +66,16 @@ export const getAppConfigs = catchAsync(async (req: Request, res: Response) => {
   const { key } = req.params;
   
   if (key) {
-    // নির্দিষ্ট একটি কী (যেমন: daily_quote) এর জন্য ডেটা ফেচ করা
     const config = await SystemService.getAppConfigByKey(key);
     if (!config) return sendResponse(res, { statusCode: 404, success: false, message: 'Config not found' });
     return sendResponse(res, { statusCode: 200, success: true, message: 'Config fetched', data: config });
   }
 
-  // কোনো কী না দিলে সব গ্লোবাল কনফিগ ফেচ করবে
   const configs = await SystemService.getGlobalConfigs();
   sendResponse(res, { statusCode: 200, success: true, message: 'Configs fetched', data: configs });
 });
 
 export const updateAppConfig = catchAsync(async (req: Request, res: Response) => {
-  // URL প্যারামিটার থেকে কী না পেলে বডি থেকে নিবে
   const key = req.params.key || req.body.key;
   const valuePayload = req.body.value ? { value: req.body.value } : req.body;
   
@@ -87,6 +84,14 @@ export const updateAppConfig = catchAsync(async (req: Request, res: Response) =>
   const config = await SystemService.upsertAppConfig(key, valuePayload);
   await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'app_configs', key, valuePayload);
   sendResponse(res, { statusCode: 200, success: true, message: 'Config updated', data: config });
+});
+
+// New controller specifically for XP Rules
+export const updateXPRules = catchAsync(async (req: Request, res: Response) => {
+  const rules = req.body;
+  const data = await SystemService.updateXPRules(rules);
+  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'app_configs', 'xp_rules', rules);
+  sendResponse(res, { statusCode: 200, success: true, message: 'XP rules updated successfully', data });
 });
 
 export const getThemeConfig = catchAsync(async (req: Request, res: Response) => {
@@ -112,7 +117,6 @@ export const getThemeConfig = catchAsync(async (req: Request, res: Response) => 
   sendResponse(res, { statusCode: 200, success: true, message: 'Theme configuration fetched successfully', data: theme });
 });
 
-// ... (Remaining Controller code for Emergency Flags, Support, Audit Logs, etc.) ...
 // Global Notice 
 export const updateGlobalNotice = catchAsync(async (req: Request, res: Response) => {
   const notice = await SystemService.updateGlobalNotice(req.body);

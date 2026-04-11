@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase';
+import { supabaseAdmin } from '../../config/supabaseAdmin';
 
 // ==========================================
 // Home Grids (Dynamic Homepage Builder)
@@ -15,20 +16,20 @@ export const getActiveHomeGrids = async () => {
 };
 
 export const upsertHomeGrid = async (gridPayload: any) => {
-  const { data, error } = await supabase.from('home_grids').upsert(gridPayload).select().single();
+  const { data, error } = await supabaseAdmin.from('home_grids').upsert(gridPayload).select().single();
   if (error) throw error;
   return data;
 };
 
 export const deleteHomeGrid = async (id: string) => {
-  const { error } = await supabase.from('home_grids').delete().eq('id', id);
+  const { error } = await supabaseAdmin.from('home_grids').delete().eq('id', id);
   if (error) throw error;
   return true;
 };
 
 export const reorderHomeGrids = async (reorderPayload: { id: string, serial_order: number }[]) => {
   for (const item of reorderPayload) {
-    const { error } = await supabase.from('home_grids').update({ serial_order: item.serial_order }).eq('id', item.id);
+    const { error } = await supabaseAdmin.from('home_grids').update({ serial_order: item.serial_order }).eq('id', item.id);
     if(error) throw error;
   }
   return true;
@@ -38,8 +39,8 @@ export const reorderHomeGrids = async (reorderPayload: { id: string, serial_orde
 // Global Configs & Remote Controls
 // ==========================================
 export const getGlobalConfigs = async () => {
-  // daily_quote কী-টি এখানে যোগ করা হলো
-  const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config', 'daily_quote']);
+  // xp_rules এবং daily_quote যোগ করা হলো
+  const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config', 'daily_quote', 'xp_rules']);
   if (error) throw error;
   return data;
 };
@@ -52,7 +53,8 @@ export const getAppConfigByKey = async (key: string) => {
 };
 
 export const upsertAppConfig = async (key: string, valuePayload: any) => {
-  const { data, error } = await supabase.from('app_configs').upsert({ key, ...valuePayload }, { onConflict: 'key' }).select().single();
+  // RLS বাইপাস করতে supabaseAdmin ব্যবহার করা হলো
+  const { data, error } = await supabaseAdmin.from('app_configs').upsert({ key, ...valuePayload }, { onConflict: 'key' }).select().single();
   if (error) throw error;
   return data;
 };
@@ -69,6 +71,20 @@ export const getGlobalThemeConfig = async () => {
 };
 
 // ==========================================
+// XP Rules (New specific service)
+// ==========================================
+export const updateXPRules = async (rules: any) => {
+  const { data, error } = await supabaseAdmin
+    .from('app_configs')
+    .upsert({ key: 'xp_rules', value: rules }, { onConflict: 'key' })
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+// ==========================================
 // Emergency Flags (Kill Switches)
 // ==========================================
 export const getEmergencyFlags = async () => {
@@ -78,13 +94,13 @@ export const getEmergencyFlags = async () => {
 };
 
 export const createEmergencyFlag = async (flagPayload: any) => {
-  const { data, error } = await supabase.from('emergency_flags').insert(flagPayload).select().single();
+  const { data, error } = await supabaseAdmin.from('emergency_flags').insert(flagPayload).select().single();
   if (error) throw error;
   return data;
 };
 
 export const toggleEmergencyFlag = async (key: string, is_active: boolean) => {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('emergency_flags')
     .update({ is_active, activated_at: is_active ? new Date().toISOString() : null })
     .eq('key', key)
@@ -104,7 +120,7 @@ export const getSupportTickets = async () => {
 };
 
 export const updateSupportTicket = async (id: string, updates: any) => {
-  const { data, error } = await supabase.from('user_reports').update(updates).eq('id', id).select().single();
+  const { data, error } = await supabaseAdmin.from('user_reports').update(updates).eq('id', id).select().single();
   if (error) throw error;
   return data;
 };
@@ -119,7 +135,7 @@ export const getAuditLogs = async () => {
 };
 
 export const createAuditLog = async (adminId: string, action: string, targetTable: string, targetId: string, details: any) => {
-  const { error } = await supabase.from('audit_logs').insert({ user_id: adminId, action, target_table: targetTable, target_id: targetId, details });
+  const { error } = await supabaseAdmin.from('audit_logs').insert({ user_id: adminId, action, target_table: targetTable, target_id: targetId, details });
   if (error) console.error('Failed to create audit log:', error);
 };
 
@@ -133,7 +149,7 @@ export const getAdminAlerts = async () => {
 };
 
 export const resolveAdminAlert = async (id: string, adminId: string) => {
-  const { data, error } = await supabase.from('admin_alerts').update({ is_read: true, status: 'resolved', resolved_by: adminId, resolved_at: new Date().toISOString() }).eq('id', id).select().single();
+  const { data, error } = await supabaseAdmin.from('admin_alerts').update({ is_read: true, status: 'resolved', resolved_by: adminId, resolved_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw error;
   return data;
 };
@@ -142,7 +158,7 @@ export const resolveAdminAlert = async (id: string, adminId: string) => {
 // Global Notice (Merged from Admin System)
 // ==========================================
 export const updateGlobalNotice = async (noticeData: any) => {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from('app_configs')
     .upsert({ key: 'global_notice', value: noticeData }, { onConflict: 'key' })
     .select()
