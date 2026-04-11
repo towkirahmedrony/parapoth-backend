@@ -45,7 +45,8 @@ export class ReferralService {
     let currentBonus = 200;
     if (!configError && configData?.value) {
       const rules = configData.value as any;
-      if (rules.referral_bonus) currentBonus = Number(rules.referral_bonus);
+      // এখানে আপডেট করা হয়েছে: referral_bonus_referrer ব্যবহার করা হলো
+      if (rules.referral_bonus_referrer) currentBonus = Number(rules.referral_bonus_referrer);
     }
 
     const { data, error } = await supabaseAdmin
