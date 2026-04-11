@@ -1,6 +1,8 @@
 import { supabase } from '../../config/supabase';
+import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { Profile } from './auth.types';
 import jwt from 'jsonwebtoken';
+import { ReferralService } from '../referral/referral.service';
 
 export const authService = {
   async getProfile(userId: string): Promise<Profile> {
@@ -8,7 +10,27 @@ export const authService = {
     if (error) throw error;
     if (!data) throw new Error('Profile not found');
     if (data.account_status !== 'active') throw new Error(`Account ${data.account_status}. Please contact support.`);
+    
+    // --- Auto Referral Logic ---
+    // ব্যাকগ্রাউন্ডে চেক করবে ইউজারের মেটাডেটাতে কোনো রেফারেল কোড আছে কিনা
+    this.checkAndProcessReferral(userId).catch(err => 
+      console.error('Background auto-referral processing error:', err)
+    );
+
     return data as Profile;
+  },
+
+  async checkAndProcessReferral(userId: string): Promise<void> {
+    // Auth টেবিল থেকে ইউজার মেটাডেটা আনা
+    const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+    if (error || !userData?.user) return;
+
+    const referredByCode = userData.user.user_metadata?.referred_by_code;
+    
+    // যদি কোড থাকে, তাহলে রেফারেল প্রসেস করা
+    if (referredByCode) {
+      await ReferralService.processAutoReferral(userId, referredByCode);
+    }
   },
 
   async updateLastActive(userId: string): Promise<void> {
@@ -70,7 +92,6 @@ export const authService = {
     }
   },
 
-  // --- Dynamic XP Reward System ---
   async grantSignupXP(userId: string): Promise<void> {
     const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
     const xp = (data?.value as any)?.signup_bonus || 50;

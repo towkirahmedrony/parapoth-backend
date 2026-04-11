@@ -36,14 +36,13 @@ export class ReferralService {
   }
 
   static async getHistory(userId: string) {
-    // অ্যাডমিন প্যানেলের xp_rules থেকে ডায়নামিক ভ্যালু রিড করা
     const { data: configData, error: configError } = await supabaseAdmin
       .from('app_configs')
       .select('value')
       .eq('key', 'xp_rules')
       .single();
 
-    let currentBonus = 200; // Default
+    let currentBonus = 200;
     if (!configError && configData?.value) {
       const rules = configData.value as any;
       if (rules.referral_bonus) currentBonus = Number(rules.referral_bonus);
@@ -82,5 +81,42 @@ export class ReferralService {
     }
 
     return { success: true, message: "Referral applied successfully!" };
+  }
+
+  // নতুন ফাংশন: অটোমেটিক রেফারেল প্রসেস করার জন্য
+  static async processAutoReferral(userId: string, referredByCode: string) {
+    try {
+      // চেক করুন ইউজার ইতোমধ্যে রেফার্ড কিনা
+      const { data: profile, error: profileErr } = await supabaseAdmin
+        .from('profiles')
+        .select('referred_by')
+        .eq('id', userId)
+        .single();
+
+      if (profileErr) throw profileErr;
+
+      // যদি আগে থেকেই referred_by থাকে, তার মানে রিডিম করা হয়ে গেছে
+      if (profile.referred_by) {
+        return { success: false, message: 'Already referred' };
+      }
+
+      // ডাটাবেজ ফাংশন কল করে রিডিম করা
+      const { error } = await supabaseAdmin.rpc('apply_referral_code', {
+        p_user_id: userId,
+        p_referral_code: referredByCode.trim().toUpperCase()
+      });
+
+      if (error) throw error;
+
+      // মেটাডেটা থেকে কোড মুছে ফেলা যেন বারবার ট্রাই না করে
+      await supabaseAdmin.auth.admin.updateUserById(userId, {
+        user_metadata: { referred_by_code: null }
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Process auto referral failed:', error);
+      return { success: false, error };
+    }
   }
 }
