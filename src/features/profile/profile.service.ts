@@ -32,6 +32,26 @@ export class ProfileService {
     return updated;
   }
 
+  // নতুন মেথড: ইউজারের থিম প্রেফারেন্স আপডেট করার জন্য
+  static async updateThemePreference(userId: string, theme: string) {
+    // ইউজারের বর্তমান সেটিংস ফেচ করা
+    const { data: profile } = await supabase.from('profiles').select('settings').eq('id', userId).single();
+    
+    // JSON অবজেক্ট মার্জ করা যাতে অন্য কোনো সেটিংস মুছে না যায়
+    const currentSettings = (profile?.settings as Record<string, any>) || {};
+    const updatedSettings = { ...currentSettings, theme };
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ settings: updatedSettings })
+      .eq('id', userId)
+      .select('settings')
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data?.settings;
+  }
+
   static async getPublicProfile(identifier: string) {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier);
     let query = supabase.from('profiles').select('id, username, full_name, avatar_url, bio, total_xp, pvp_rating, current_streak, batch_year');

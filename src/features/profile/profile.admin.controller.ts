@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import * as AdminProfileService from './profile.admin.service';
 import catchAsync from '../../lib/utils/catchAsync';
-import sendResponse from '../../lib/utils/response'; // <-- Default import করা হলো
+import sendResponse from '../../lib/utils/response';
 
 export const getIdentity = catchAsync(async (req: Request, res: Response) => {
   const adminId = (req as any).user.id;
@@ -13,6 +13,14 @@ export const updateIdentity = catchAsync(async (req: Request, res: Response) => 
   const adminId = (req as any).user.id;
   const data = await AdminProfileService.updateAdminIdentity(adminId, req.body);
   sendResponse(res, { statusCode: 200, success: true, message: 'Admin profile updated successfully', data });
+});
+
+// নতুন কন্ট্রোলার: এডমিন থিম আপডেট
+export const updateTheme = catchAsync(async (req: Request, res: Response) => {
+  const adminId = (req as any).user.id;
+  const { theme } = req.body;
+  const data = await AdminProfileService.updateAdminThemePreference(adminId, theme);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Admin theme preference updated', data });
 });
 
 export const getPerformance = catchAsync(async (req: Request, res: Response) => {

@@ -5,15 +5,13 @@ import { rbacGuard } from '../../middlewares/rbacGuard';
 
 const router = Router();
 
-// Apply auth middleware to all admin profile routes
 router.use(requireAuth);
-
-// Ensure only users with 'admin' or 'super_admin' roles can access these
 router.use(rbacGuard(['admin', 'super_admin'])); 
 
-// Identity
+// Identity & Theme
 router.get('/identity', AdminProfileController.getIdentity);
 router.patch('/identity', AdminProfileController.updateIdentity);
+router.patch('/identity/theme', AdminProfileController.updateTheme); // নতুন রাউট
 
 // Performance
 router.get('/performance', AdminProfileController.getPerformance);

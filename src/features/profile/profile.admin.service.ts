@@ -4,7 +4,8 @@ import { UpdateAdminProfileDTO } from './profile.admin.types';
 export const getAdminIdentity = async (adminId: string) => {
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id, full_name, username, email, phone_number, bio, gender, date_of_birth, address, language_preference, avatar_url, account_status, created_at, is_2fa_enabled')
+    // এখানে settings কলামটি যুক্ত করা হয়েছে
+    .select('id, full_name, username, email, phone_number, bio, gender, date_of_birth, address, language_preference, avatar_url, account_status, created_at, is_2fa_enabled, settings')
     .eq('id', adminId)
     .single();
 
@@ -17,7 +18,7 @@ export const getAdminIdentity = async (adminId: string) => {
     .eq('is_active', true)
     .single();
 
-  if (roleError && roleError.code !== 'PGRST116') throw roleError; // PGRST116 is not found
+  if (roleError && roleError.code !== 'PGRST116') throw roleError;
 
   return {
     ...profile,
@@ -37,8 +38,25 @@ export const updateAdminIdentity = async (adminId: string, data: UpdateAdminProf
   return updatedProfile;
 };
 
+// নতুন মেথড: এডমিনের থিম সেটিংস আপডেট করার জন্য
+export const updateAdminThemePreference = async (adminId: string, theme: string) => {
+  const { data: profile } = await supabase.from('profiles').select('settings').eq('id', adminId).single();
+  
+  const currentSettings = (profile?.settings as Record<string, any>) || {};
+  const updatedSettings = { ...currentSettings, theme };
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ settings: updatedSettings })
+    .eq('id', adminId)
+    .select('settings')
+    .single();
+
+  if (error) throw error;
+  return data?.settings;
+};
+
 export const getAdminPerformance = async (adminId: string, timeframe: string) => {
-  // Simplification for timeframe logic; adjust based on actual requirements
   const { data, error } = await supabase
     .from('admin_performance_stats')
     .select('*')
@@ -87,7 +105,6 @@ export const toggle2FA = async (adminId: string, isEnabled: boolean) => {
 };
 
 export const getAdminPermissions = async (adminId: string) => {
-  // First get the role
   const { data: roleData } = await supabase
     .from('user_roles')
     .select('role')
@@ -97,7 +114,6 @@ export const getAdminPermissions = async (adminId: string) => {
 
   if (!roleData?.role) return [];
 
-  // Then get permissions for that role
   const { data: permissionsData, error } = await supabase
     .from('role_permissions')
     .select('permissions(action)')

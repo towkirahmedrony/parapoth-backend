@@ -13,6 +13,13 @@ export const updateProfile = catchAsync(async (req: Request, res: Response) => {
   sendResponse(res, 200, true, 'Profile updated successfully', updated);
 });
 
+// নতুন কন্ট্রোলার মেথড: থিম আপডেট
+export const updateThemePreference = catchAsync(async (req: Request, res: Response) => {
+  const { theme } = req.body;
+  const updatedSettings = await ProfileService.updateThemePreference(req.user!.id, theme);
+  sendResponse(res, 200, true, 'Theme preference updated', updatedSettings);
+});
+
 export const getPublicProfile = catchAsync(async (req: Request, res: Response) => {
   const { identifier } = req.params;
   const profile = await ProfileService.getPublicProfile(identifier);
