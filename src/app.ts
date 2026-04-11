@@ -38,9 +38,14 @@ dotenv.config();
 
 const app: Application = express();
 
+// Environment variable থেকে আসা কমা-যুক্ত URL গুলোকে ভেঙে Array বানানো
+const envClientUrls = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(',') 
+  : [];
+
 // CORS Allowed Origins সেটআপ
 const allowedOrigins = [
-  process.env.CLIENT_URL,
+  ...envClientUrls, // 👈 এখানে স্প্রেড অপারেটর (...) দিয়ে ভাঙা URL গুলো যুক্ত করা হলো
   'http://localhost:5173', 
   'http://localhost:5174',
   'http://127.0.0.1:5174',
@@ -133,3 +138,4 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 export default app;
+
