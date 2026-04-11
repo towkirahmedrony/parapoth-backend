@@ -27,17 +27,12 @@ export const createCampaign = async (campaignData: any, adminId: string) => {
       const tokens = userDevices.map(device => device.fcm_token);
       
       const message = {
-        notification: {
-          title: campaignData.title_bn || campaignData.title_en,
-          body: campaignData.body_bn || campaignData.body_en,
-        },
-        webpush: {
-          headers: {
-            image: campaignData.image_url || ''
-          },
-          fcm_options: {
-            link: campaignData.action_link || '/'
-          }
+        data: {
+          title: campaignData.title_bn || campaignData.title_en || 'New Notification',
+          body: campaignData.body_bn || campaignData.body_en || '',
+          image_url: campaignData.image_url || '',
+          action_link: campaignData.action_link || '/',
+          type: 'campaign'
         },
         tokens: tokens // সব টোকেনে পাঠানো হচ্ছে
       };

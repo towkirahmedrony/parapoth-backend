@@ -67,17 +67,12 @@ export const sendPushNotification = async (userId: string, title: string, body: 
     const tokens = userDevices.map(device => device.fcm_token);
 
     const message = {
-      notification: {
-        title: title,
-        body: body,
-      },
-      webpush: {
-        headers: {
-          image: imageUrl || ''
-        },
-        fcm_options: {
-          link: actionLink || '/'
-        }
+      data: {
+        title: title || 'New Notification',
+        body: body || '',
+        image_url: imageUrl || '',
+        action_link: actionLink || '/',
+        type: 'general'
       },
       tokens: tokens
     };
