@@ -34,13 +34,36 @@ export class ExamUserService {
     return questions.sort(() => 0.5 - Math.random());
   }
 
-  static async getArenaQuestions(limit: number) {
-    const { data, error } = await supabase
+  // 🌟 আপডেট: subjectSlug প্যারামিটার যোগ করা হলো
+  static async getArenaQuestions(limit: number, subjectSlug?: string) {
+    let subjectId = null;
+
+    // যদি subjectSlug পাঠানো হয়, ডাটাবেজ থেকে সেই সাবজেক্টের আইডি বের করে নেওয়া
+    if (subjectSlug) {
+      const { data: subjectData, error: subjectError } = await supabase
+        .from('subjects')
+        .select('id')
+        .eq('slug', subjectSlug)
+        .single();
+      
+      if (subjectData) {
+        subjectId = subjectData.id;
+      }
+    }
+
+    let query = supabase
       .from('questions')
       .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
-      .eq('is_active', true)
-      .limit(limit);
+      .eq('is_active', true);
+
+    // যদি subjectId পাওয়া যায়, তবে নির্দিষ্ট সাবজেক্টের প্রশ্ন ফিল্টার হবে
+    if (subjectId) {
+      query = query.eq('subject_id', subjectId);
+    }
+
+    const { data, error } = await query.limit(limit);
     if (error) throw new Error(error.message);
+    
     return data.sort(() => 0.5 - Math.random());
   }
 

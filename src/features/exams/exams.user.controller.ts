@@ -11,7 +11,10 @@ export const generateExam = catchAsync(async (req: Request, res: Response) => {
 
 export const getArena = catchAsync(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
-  const result = await ExamUserService.getArenaQuestions(limit);
+  // 🌟 আপডেট: query থেকে subjectSlug রিসিভ করা হলো
+  const subjectSlug = req.query.subjectSlug as string | undefined; 
+  
+  const result = await ExamUserService.getArenaQuestions(limit, subjectSlug);
   sendResponse(res, { statusCode: 200, success: true, message: 'Arena questions fetched', data: result });
 });
 
@@ -20,7 +23,6 @@ export const submitHistory = catchAsync(async (req: Request, res: Response) => {
   const result = await ExamUserService.submitHistory(userId, req.body);
   
   if (userId) {
-    // 🌟 আপডেট: await দেওয়া হলো যাতে ডাটাবেস আপডেট শেষ করে রেসপন্স পাঠায়
     await incrementStreakOnExamSubmit(userId);
   }
 
@@ -33,7 +35,6 @@ export const submitExam = catchAsync(async (req: Request, res: Response) => {
   const result = await ExamUserService.submitExamResult(payload);
 
   if (userId) {
-    // 🌟 আপডেট: await দেওয়া হলো
     await incrementStreakOnExamSubmit(userId);
   }
 
