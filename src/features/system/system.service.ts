@@ -39,13 +39,11 @@ export const reorderHomeGrids = async (reorderPayload: { id: string, serial_orde
 // Global Configs & Remote Controls
 // ==========================================
 export const getGlobalConfigs = async () => {
-  // xp_rules এবং daily_quote যোগ করা হলো
   const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config', 'daily_quote', 'xp_rules']);
   if (error) throw error;
   return data;
 };
 
-// নির্দিষ্ট একটি কী দিয়ে কনফিগ আনার ফাংশন
 export const getAppConfigByKey = async (key: string) => {
   const { data, error } = await supabase.from('app_configs').select('*').eq('key', key).maybeSingle();
   if (error) throw error;
@@ -53,7 +51,6 @@ export const getAppConfigByKey = async (key: string) => {
 };
 
 export const upsertAppConfig = async (key: string, valuePayload: any) => {
-  // RLS বাইপাস করতে supabaseAdmin ব্যবহার করা হলো
   const { data, error } = await supabaseAdmin.from('app_configs').upsert({ key, ...valuePayload }, { onConflict: 'key' }).select().single();
   if (error) throw error;
   return data;
@@ -63,7 +60,7 @@ export const getGlobalThemeConfig = async () => {
   const { data, error } = await supabase
     .from('app_configs')
     .select('value')
-    .eq('key', 'ui_theme_settings')
+    .eq('key', 'theme_config') // 🟢 FIXED KEY
     .single();
 
   if (error && error.code !== 'PGRST116') throw error;
