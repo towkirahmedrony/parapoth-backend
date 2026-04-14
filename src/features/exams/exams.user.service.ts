@@ -84,6 +84,22 @@ export class ExamUserService {
     const { data, error } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (error) throw new Error(error.message);
 
+    // 🌟 নতুন: যদি ফ্রন্টএন্ড details_json এর ভেতরে প্রশ্নের বিস্তারিত ডেটা (question_id, is_correct ইত্যাদি) পাঠিয়ে থাকে
+    if (data && payload.details_json && Array.isArray(payload.details_json.detailedResults)) {
+       const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
+          exam_history_id: data.id,
+          question_id: d.question_id,
+          selected_option: d.selected_option || null,
+          is_correct: d.is_correct || false,
+          marks_awarded: d.marks_awarded || 0
+       }));
+
+       if (detailsToInsert.length > 0) {
+          const { error: detailsError } = await supabase.from('exam_history_details').insert(detailsToInsert);
+          if (detailsError) console.error("Failed to insert details from history:", detailsError);
+       }
+    }
+
     const totalQuestions = payload.correct_count + payload.wrong_count + payload.skipped_count;
     const earnedXP = await calculateExamXP(payload.correct_count, totalQuestions);
 
@@ -100,14 +116,39 @@ export class ExamUserService {
     const { data: questions } = await supabase.from('questions').select('id, options').in('id', questionIds);
 
     let correct = 0, wrong = 0, skipped = 0, totalScore = 0;
+    
+    // 🌟 নতুন: details সেভ করার জন্য একটি অ্যারে নিলাম
+    const detailsToInsert: any[] = []; 
+
     questions?.forEach((q: any) => {
       const userAnswerId = answers[q.id];
       const optionsArray = (q.options as any[]) || [];
       const correctOption = optionsArray.find((opt: any) => opt.isCorrect);
 
-      if (!userAnswerId) skipped++;
-      else if (correctOption && userAnswerId === correctOption.id) { correct++; totalScore += 1; }
-      else { wrong++; totalScore -= (examData.default_negative_marks || 0.25); }
+      let isCorrect = false;
+      let marksAwarded = 0;
+
+      if (!userAnswerId) {
+        skipped++;
+      } else if (correctOption && userAnswerId === correctOption.id) { 
+        correct++; 
+        totalScore += 1; 
+        isCorrect = true;
+        marksAwarded = 1;
+      } else { 
+        wrong++; 
+        totalScore -= (examData.default_negative_marks || 0.25); 
+        isCorrect = false;
+        marksAwarded = -(examData.default_negative_marks || 0.25);
+      }
+
+      // 🌟 নতুন: প্রতিটা প্রশ্নের ডেটা অ্যারেতে পুশ করছি
+      detailsToInsert.push({
+        question_id: q.id,
+        selected_option: userAnswerId || null,
+        is_correct: isCorrect,
+        marks_awarded: marksAwarded
+      });
     });
 
     const resultPayload = {
@@ -117,8 +158,20 @@ export class ExamUserService {
       time_taken, details_json: { userAnswers: answers }
     };
 
+    // Main Exam History Save
     const { data: result, error: submitError } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (submitError) throw new Error(submitError.message);
+
+    // 🌟 নতুন: Exam History Details Save
+    if (result && detailsToInsert.length > 0) {
+      const finalDetails = detailsToInsert.map(d => ({
+        ...d,
+        exam_history_id: result.id // জেনারেট হওয়া হিস্ট্রি আইডি যুক্ত করে দিলাম
+      }));
+      
+      const { error: detailsError } = await supabase.from('exam_history_details').insert(finalDetails);
+      if (detailsError) console.error("Failed to insert details:", detailsError);
+    }
 
     const totalQuestions = questions?.length || 0;
     const earnedXP = await calculateExamXP(correct, totalQuestions);

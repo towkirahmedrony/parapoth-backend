@@ -1,8 +1,11 @@
 import { supabase } from '../../config/supabase';
 import { ProgressDashboardResponse } from './progress.types';
 
+// Python API URL (টারমাক্সে লোকালহোস্টে রান করার জন্য)
+const PYTHON_AI_SERVICE_URL = process.env.PYTHON_AI_SERVICE_URL || 'http://127.0.0.1:8000/api/v1/analyze-progress';
+
 export const getProgressDashboardData = async (userId: string): Promise<ProgressDashboardResponse> => {
-  // ডাটাবেইজ থেকে প্রোফাইল ফেচ করা হচ্ছে
+  // 1. ডাটাবেইজ থেকে প্রোফাইল ফেচ করা হচ্ছে
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name, batch_year, current_streak, total_xp')
@@ -44,8 +47,10 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
   const { data: subjectStats } = await supabase
     .rpc('get_student_subject_analytics', { p_user_id: userId });
 
-  const skillMapping = [];
-  const subjectReport = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const skillMapping: any[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const subjectReport: any[] = [];
 
   if (subjectStats) {
     for (const stat of subjectStats) {
@@ -83,12 +88,45 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     .rpc('get_student_weaknesses', { p_user_id: userId })
     .limit(3);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const weaknesses = weaknessRaw?.map((w: any) => ({
     topic: w.topic_name,
     subject: w.subject_name,
     errorRate: `${Math.round(w.error_rate)}%`
   })) || [];
 
+  // 7. 🔥 Fetch AI Insights from Python Microservice 🔥
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let aiInsights: any = null;
+  
+  try {
+    const studentDataForAI = {
+      user_id: userId,
+      weaknesses,
+      subject_report: subjectReport,
+      avg_score: Number(avgScore.toFixed(1))
+    };
+
+    // Node 18+ এ ডিফল্টভাবেই fetch কাজ করে
+    const aiResponse = await fetch(PYTHON_AI_SERVICE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(studentDataForAI)
+    });
+
+    if (aiResponse.ok) {
+      const aiResult = await aiResponse.json();
+      aiInsights = aiResult.data;
+      console.log("✅ AI Insights Fetched Successfully");
+    } else {
+      console.error("⚠️ AI Service returned status:", aiResponse.status);
+    }
+  } catch (error) {
+    console.error("❌ Failed to fetch AI insights from Python service:", error);
+    // AI সার্ভিস ডাউন থাকলে বা টারমাক্সে না চললে যেন ড্যাশবোর্ড ক্র্যাশ না করে, তাই error catch করা হলো
+  }
+
+  // 8. রিটার্ন ডেটা
   return {
     user: {
       name: profile?.full_name || 'Student',
@@ -104,7 +142,13 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     skillMapping,
     activityHeatmap,
     weaknesses,
-    focusTopic: weaknesses.length > 0 ? weaknesses[0].topic : 'General Revision',
-    subjectReport
+    focusTopic: aiInsights?.focus_action || (weaknesses.length > 0 ? weaknesses[0].topic : 'General Revision'),
+    subjectReport,
+    // AI ডেটা অবজেক্টে যুক্ত করা হলো
+    aiAnalysis: aiInsights || {
+      strong_points: [],
+      weak_points: [],
+      personalized_suggestions: ["নিয়মিত পরীক্ষা দিয়ে নিজের স্কিল যাচাই করুন।"]
+    }
   };
 };

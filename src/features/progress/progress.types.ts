@@ -35,6 +35,14 @@ export interface SubjectReportData {
   skipped: number;
 }
 
+// 🤖 AI অ্যানালাইসিসের ডেটার জন্য নতুন ইন্টারফেস
+export interface AIAnalysisData {
+  strong_points: string[];
+  weak_points: string[];
+  personalized_suggestions: string[];
+  focus_action?: string;
+}
+
 export interface ProgressDashboardResponse {
   user: {
     name: string;
@@ -47,4 +55,7 @@ export interface ProgressDashboardResponse {
   weaknesses: WeaknessData[];
   focusTopic: string;
   subjectReport: SubjectReportData[];
+  
+  // 🔥 নতুন যুক্ত করা এআই অ্যানালাইসিস প্রপার্টি
+  aiAnalysis: AIAnalysisData;
 }
