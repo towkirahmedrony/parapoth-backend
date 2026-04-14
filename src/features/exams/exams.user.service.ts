@@ -6,7 +6,7 @@ const calculateExamXP = async (correctCount: number, totalQuestions: number): Pr
   const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
   const rules = (data?.value as any) || {};
 
-  let xp = 20; // বেস পয়েন্ট (আপনি চাইলে এটিও রুলসে যোগ করতে পারেন)
+  let xp = 20; // বেস পয়েন্ট
   const perCorrect = rules.per_correct_answer || 5;
   xp += (correctCount * perCorrect);
   
@@ -34,13 +34,11 @@ export class ExamUserService {
     return questions.sort(() => 0.5 - Math.random());
   }
 
-  // 🌟 আপডেট: subjectSlug প্যারামিটার যোগ করা হলো
   static async getArenaQuestions(limit: number, subjectSlug?: string) {
     let subjectId = null;
 
-    // যদি subjectSlug পাঠানো হয়, ডাটাবেজ থেকে সেই সাবজেক্টের আইডি বের করে নেওয়া
     if (subjectSlug) {
-      const { data: subjectData, error: subjectError } = await supabase
+      const { data: subjectData } = await supabase
         .from('subjects')
         .select('id')
         .eq('slug', subjectSlug)
@@ -56,7 +54,6 @@ export class ExamUserService {
       .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
       .eq('is_active', true);
 
-    // যদি subjectId পাওয়া যায়, তবে নির্দিষ্ট সাবজেক্টের প্রশ্ন ফিল্টার হবে
     if (subjectId) {
       query = query.eq('subject_id', subjectId);
     }
@@ -84,7 +81,7 @@ export class ExamUserService {
     const { data, error } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (error) throw new Error(error.message);
 
-    // 🌟 নতুন: যদি ফ্রন্টএন্ড details_json এর ভেতরে প্রশ্নের বিস্তারিত ডেটা (question_id, is_correct ইত্যাদি) পাঠিয়ে থাকে
+    // 🌟 নতুন আপডেট: exam_history_details এ ডাটা সেভ করার লজিক
     if (data && payload.details_json && Array.isArray(payload.details_json.detailedResults)) {
        const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
           exam_history_id: data.id,
@@ -96,8 +93,14 @@ export class ExamUserService {
 
        if (detailsToInsert.length > 0) {
           const { error: detailsError } = await supabase.from('exam_history_details').insert(detailsToInsert);
-          if (detailsError) console.error("Failed to insert details from history:", detailsError);
+          if (detailsError) {
+             console.error("❌ Failed to insert details:", detailsError);
+          } else {
+             console.log(`✅ Successfully saved ${detailsToInsert.length} rows to exam_history_details!`);
+          }
        }
+    } else {
+       console.log("⚠️ No detailedResults found in payload from frontend.");
     }
 
     const totalQuestions = payload.correct_count + payload.wrong_count + payload.skipped_count;
@@ -116,8 +119,6 @@ export class ExamUserService {
     const { data: questions } = await supabase.from('questions').select('id, options').in('id', questionIds);
 
     let correct = 0, wrong = 0, skipped = 0, totalScore = 0;
-    
-    // 🌟 নতুন: details সেভ করার জন্য একটি অ্যারে নিলাম
     const detailsToInsert: any[] = []; 
 
     questions?.forEach((q: any) => {
@@ -142,7 +143,6 @@ export class ExamUserService {
         marksAwarded = -(examData.default_negative_marks || 0.25);
       }
 
-      // 🌟 নতুন: প্রতিটা প্রশ্নের ডেটা অ্যারেতে পুশ করছি
       detailsToInsert.push({
         question_id: q.id,
         selected_option: userAnswerId || null,
@@ -158,19 +158,21 @@ export class ExamUserService {
       time_taken, details_json: { userAnswers: answers }
     };
 
-    // Main Exam History Save
     const { data: result, error: submitError } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (submitError) throw new Error(submitError.message);
 
-    // 🌟 নতুন: Exam History Details Save
     if (result && detailsToInsert.length > 0) {
       const finalDetails = detailsToInsert.map(d => ({
         ...d,
-        exam_history_id: result.id // জেনারেট হওয়া হিস্ট্রি আইডি যুক্ত করে দিলাম
+        exam_history_id: result.id
       }));
       
       const { error: detailsError } = await supabase.from('exam_history_details').insert(finalDetails);
-      if (detailsError) console.error("Failed to insert details:", detailsError);
+      if (detailsError) {
+         console.error("❌ Failed to insert details:", detailsError);
+      } else {
+         console.log(`✅ Successfully saved ${finalDetails.length} rows to exam_history_details!`);
+      }
     }
 
     const totalQuestions = questions?.length || 0;
