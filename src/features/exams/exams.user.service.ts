@@ -81,23 +81,42 @@ export class ExamUserService {
     const { data, error } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (error) throw new Error(error.message);
 
-    // 🌟 নতুন আপডেট: exam_history_details এ ডাটা সেভ করার লজিক
+    // 🌟 আপডেট: exam_history_details এবং wrong_answers এ ডাটা সেভ করার লজিক
     if (data && payload.details_json && Array.isArray(payload.details_json.detailedResults)) {
-       const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
-          exam_history_id: data.id,
-          question_id: d.question_id,
-          selected_option: d.selected_option || null,
-          is_correct: d.is_correct || false,
-          marks_awarded: d.marks_awarded || 0
-       }));
+       const detailsToInsert: any[] = [];
+       const wrongAnswersToInsert: any[] = [];
+
+       payload.details_json.detailedResults.forEach((d: any) => {
+          // ১. exam_history_details এর জন্য ডেটা প্রস্তুত করা
+          detailsToInsert.push({
+             exam_history_id: data.id,
+             question_id: d.question_id,
+             selected_option: d.selected_option || null,
+             is_correct: d.is_correct || false,
+             marks_awarded: d.marks_awarded || 0
+          });
+
+          // ২. wrong_answers এর জন্য ডেটা প্রস্তুত করা (যদি উত্তর ভুল হয়)
+          if (d.is_correct === false && d.selected_option) { // স্কিপ করা প্রশ্ন বাদ দিতে && d.selected_option চেক করা হলো
+             wrongAnswersToInsert.push({
+                user_id: userId,
+                exam_id: payload.exam_id || null,
+                question_id: d.question_id,
+                selected_option: d.selected_option,
+             });
+          }
+       });
 
        if (detailsToInsert.length > 0) {
           const { error: detailsError } = await supabase.from('exam_history_details').insert(detailsToInsert);
-          if (detailsError) {
-             console.error("❌ Failed to insert details:", detailsError);
-          } else {
-             console.log(`✅ Successfully saved ${detailsToInsert.length} rows to exam_history_details!`);
-          }
+          if (detailsError) console.error("❌ Failed to insert details:", detailsError);
+          else console.log(`✅ Successfully saved ${detailsToInsert.length} rows to exam_history_details!`);
+       }
+
+       if (wrongAnswersToInsert.length > 0) {
+          const { error: wrongAnsError } = await supabase.from('wrong_answers').insert(wrongAnswersToInsert);
+          if (wrongAnsError) console.error("❌ Failed to insert wrong answers:", wrongAnsError);
+          else console.log(`✅ Successfully saved ${wrongAnswersToInsert.length} rows to wrong_answers!`);
        }
     } else {
        console.log("⚠️ No detailedResults found in payload from frontend.");
@@ -120,6 +139,7 @@ export class ExamUserService {
 
     let correct = 0, wrong = 0, skipped = 0, totalScore = 0;
     const detailsToInsert: any[] = []; 
+    const wrongAnswersToInsert: any[] = [];
 
     questions?.forEach((q: any) => {
       const userAnswerId = answers[q.id];
@@ -141,6 +161,14 @@ export class ExamUserService {
         totalScore -= (examData.default_negative_marks || 0.25); 
         isCorrect = false;
         marksAwarded = -(examData.default_negative_marks || 0.25);
+
+        // ভুল উত্তরের জন্য wrong_answers এ ডাটা পুশ করা
+        wrongAnswersToInsert.push({
+           user_id: user_id,
+           exam_id: exam_id,
+           question_id: q.id,
+           selected_option: userAnswerId
+        });
       }
 
       detailsToInsert.push({
@@ -162,17 +190,17 @@ export class ExamUserService {
     if (submitError) throw new Error(submitError.message);
 
     if (result && detailsToInsert.length > 0) {
-      const finalDetails = detailsToInsert.map(d => ({
-        ...d,
-        exam_history_id: result.id
-      }));
+      const finalDetails = detailsToInsert.map(d => ({ ...d, exam_history_id: result.id }));
       
       const { error: detailsError } = await supabase.from('exam_history_details').insert(finalDetails);
-      if (detailsError) {
-         console.error("❌ Failed to insert details:", detailsError);
-      } else {
-         console.log(`✅ Successfully saved ${finalDetails.length} rows to exam_history_details!`);
-      }
+      if (detailsError) console.error("❌ Failed to insert details:", detailsError);
+      else console.log(`✅ Successfully saved ${finalDetails.length} rows to exam_history_details!`);
+    }
+
+    if (wrongAnswersToInsert.length > 0) {
+       const { error: wrongAnsError } = await supabase.from('wrong_answers').insert(wrongAnswersToInsert);
+       if (wrongAnsError) console.error("❌ Failed to insert wrong answers:", wrongAnsError);
+       else console.log(`✅ Successfully saved ${wrongAnswersToInsert.length} rows to wrong_answers!`);
     }
 
     const totalQuestions = questions?.length || 0;
