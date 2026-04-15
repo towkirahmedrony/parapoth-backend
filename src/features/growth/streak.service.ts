@@ -33,17 +33,12 @@ export const getStreakStats = async (userId: string) => {
       const lDate = new Date(lastActivityStr);
       const diffDays = Math.floor((tDate.getTime() - lDate.getTime()) / (1000 * 60 * 60 * 24));
 
-      // টার্মিনালে চেক করার জন্য লগ
-      console.log(`[Streak Check] User: ${userId} | Today: ${todayStr} | Last Activity: ${lastActivityStr} | Diff: ${diffDays} days`);
-
-      // যদি ২ দিন বা তার বেশি গ্যাপ থাকে
       if (diffDays >= 2) {
         console.log(`[Streak Reset] Resetting streak to 0 for user ${userId}`);
         await supabaseAdmin.from('profiles').update({ current_streak: 0 }).eq('id', userId);
         currentStreak = 0;
       }
     } else {
-      // যদি ইউজারের কোনো অ্যাক্টিভিটিই না থাকে, কিন্তু স্ট্রিক > 0 হয়ে থাকে
       console.log(`[Streak Reset] No activity found. Resetting streak to 0 for user ${userId}`);
       await supabaseAdmin.from('profiles').update({ current_streak: 0 }).eq('id', userId);
       currentStreak = 0;
