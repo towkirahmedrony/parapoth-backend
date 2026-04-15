@@ -31,37 +31,19 @@ export class ExamUserService {
       .eq('is_active', true)
       .limit(limit);
     if (error) throw new Error(error.message);
-    return questions.sort(() => 0.5 - Math.random());
+    return questions;
   }
 
   static async getArenaQuestions(limit: number, subjectSlug?: string) {
-    let subjectId = null;
-
-    if (subjectSlug) {
-      const { data: subjectData } = await supabase
-        .from('subjects')
-        .select('id')
-        .eq('slug', subjectSlug)
-        .single();
-      
-      if (subjectData) {
-        subjectId = subjectData.id;
-      }
-    }
-
     let query = supabase
       .from('questions')
       .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
-      .eq('is_active', true);
+      .eq('is_active', true)
+      .limit(limit);
 
-    if (subjectId) {
-      query = query.eq('subject_id', subjectId);
-    }
-
-    const { data, error } = await query.limit(limit);
+    const { data: questions, error } = await query;
     if (error) throw new Error(error.message);
-    
-    return data.sort(() => 0.5 - Math.random());
+    return questions;
   }
 
   static async submitHistory(userId: string, payload: SubmitHistoryDTO) {
@@ -81,45 +63,38 @@ export class ExamUserService {
     const { data, error } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (error) throw new Error(error.message);
 
-    // 🌟 আপডেট: exam_history_details এবং wrong_answers এ ডাটা সেভ করার লজিক
+    // 🌟 ফিক্স: exam_history_details এবং wrong_answers এ ডাটা সেভ করার লজিক
     if (data && payload.details_json && Array.isArray(payload.details_json.detailedResults)) {
-       const detailsToInsert: any[] = [];
-       const wrongAnswersToInsert: any[] = [];
+       
+       const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
+          exam_history_id: data.id,
+          question_id: d.question_id,
+          selected_option: d.selected_option || null,
+          is_correct: d.is_correct || false,
+          marks_awarded: d.marks_awarded || 0
+       }));
 
-       payload.details_json.detailedResults.forEach((d: any) => {
-          // ১. exam_history_details এর জন্য ডেটা প্রস্তুত করা
-          detailsToInsert.push({
-             exam_history_id: data.id,
-             question_id: d.question_id,
-             selected_option: d.selected_option || null,
-             is_correct: d.is_correct || false,
-             marks_awarded: d.marks_awarded || 0
-          });
+       const wrongAnswersToInsert = payload.details_json.detailedResults
+         .filter((d: any) => !d.is_correct && d.selected_option) 
+         .map((d: any) => ({
+            user_id: userId,
+            exam_id: payload.exam_id || null,
+            question_id: d.question_id,
+            selected_option: d.selected_option
+         }));
 
-          // ২. wrong_answers এর জন্য ডেটা প্রস্তুত করা (যদি উত্তর ভুল হয়)
-          if (d.is_correct === false && d.selected_option) { // স্কিপ করা প্রশ্ন বাদ দিতে && d.selected_option চেক করা হলো
-             wrongAnswersToInsert.push({
-                user_id: userId,
-                exam_id: payload.exam_id || null,
-                question_id: d.question_id,
-                selected_option: d.selected_option,
-             });
-          }
-       });
-
+       const promises = [];
        if (detailsToInsert.length > 0) {
-          const { error: detailsError } = await supabase.from('exam_history_details').insert(detailsToInsert);
-          if (detailsError) console.error("❌ Failed to insert details:", detailsError);
-          else console.log(`✅ Successfully saved ${detailsToInsert.length} rows to exam_history_details!`);
+          promises.push(supabase.from('exam_history_details').insert(detailsToInsert));
+       }
+       if (wrongAnswersToInsert.length > 0) {
+          promises.push(supabase.from('wrong_answers').insert(wrongAnswersToInsert));
        }
 
-       if (wrongAnswersToInsert.length > 0) {
-          const { error: wrongAnsError } = await supabase.from('wrong_answers').insert(wrongAnswersToInsert);
-          if (wrongAnsError) console.error("❌ Failed to insert wrong answers:", wrongAnsError);
-          else console.log(`✅ Successfully saved ${wrongAnswersToInsert.length} rows to wrong_answers!`);
-       }
-    } else {
-       console.log("⚠️ No detailedResults found in payload from frontend.");
+       const results = await Promise.all(promises);
+       results.forEach(res => {
+         if (res.error) console.error("❌ Database Insert Error:", res.error);
+       });
     }
 
     const totalQuestions = payload.correct_count + payload.wrong_count + payload.skipped_count;
@@ -139,7 +114,7 @@ export class ExamUserService {
 
     let correct = 0, wrong = 0, skipped = 0, totalScore = 0;
     const detailsToInsert: any[] = []; 
-    const wrongAnswersToInsert: any[] = [];
+    const wrongAnswersToInsert: any[] = []; 
 
     questions?.forEach((q: any) => {
       const userAnswerId = answers[q.id];
@@ -162,7 +137,7 @@ export class ExamUserService {
         isCorrect = false;
         marksAwarded = -(examData.default_negative_marks || 0.25);
 
-        // ভুল উত্তরের জন্য wrong_answers এ ডাটা পুশ করা
+        // 🌟 ভুল উত্তরের লিস্টে যোগ করা হচ্ছে
         wrongAnswersToInsert.push({
            user_id: user_id,
            exam_id: exam_id,
@@ -189,19 +164,24 @@ export class ExamUserService {
     const { data: result, error: submitError } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (submitError) throw new Error(submitError.message);
 
+    const promises = [];
+    
     if (result && detailsToInsert.length > 0) {
-      const finalDetails = detailsToInsert.map(d => ({ ...d, exam_history_id: result.id }));
-      
-      const { error: detailsError } = await supabase.from('exam_history_details').insert(finalDetails);
-      if (detailsError) console.error("❌ Failed to insert details:", detailsError);
-      else console.log(`✅ Successfully saved ${finalDetails.length} rows to exam_history_details!`);
+      const finalDetails = detailsToInsert.map(d => ({
+        ...d,
+        exam_history_id: result.id
+      }));
+      promises.push(supabase.from('exam_history_details').insert(finalDetails));
     }
 
     if (wrongAnswersToInsert.length > 0) {
-       const { error: wrongAnsError } = await supabase.from('wrong_answers').insert(wrongAnswersToInsert);
-       if (wrongAnsError) console.error("❌ Failed to insert wrong answers:", wrongAnsError);
-       else console.log(`✅ Successfully saved ${wrongAnswersToInsert.length} rows to wrong_answers!`);
+      promises.push(supabase.from('wrong_answers').insert(wrongAnswersToInsert));
     }
+
+    const insertResults = await Promise.all(promises);
+    insertResults.forEach(res => {
+        if (res.error) console.error("❌ Database Insert Error:", res.error);
+    });
 
     const totalQuestions = questions?.length || 0;
     const earnedXP = await calculateExamXP(correct, totalQuestions);
@@ -211,13 +191,23 @@ export class ExamUserService {
   }
 
   static async createGroupBattleExam(challengerId: string, opponentId: string, examData: any) {
-    if (challengerId === opponentId) throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন চিহ্নিত করা যাচ্ছে না!');
+    if (challengerId === opponentId) throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন না!');
     const { data, error } = await supabase.from('exam_papers').insert({
       id: examData.id, title: examData.title, subject_id: examData.subject_id, category: 'group_battle',
       is_premium: false, total_marks: examData.total_marks || 50, pass_mark: examData.pass_mark || 0,
-      duration_min: examData.duration_min || 15, is_published: true, start_time: examData.start_time, end_time: examData.end_time
+      duration_min: examData.duration_min || 15, is_published: true, start_time: new Date().toISOString(),
+      end_time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     }).select().single();
     if (error) throw new Error(error.message);
+    
+    const { error: battleError } = await supabase.from('group_battles').insert({
+       exam_id: data.id, 
+       initiated_by: challengerId, 
+       status: 'pending',
+       scores_snapshot: { [challengerId]: 0, [opponentId]: 0 }
+    });
+    if (battleError) throw new Error(battleError.message);
+    
     return data;
   }
 }
