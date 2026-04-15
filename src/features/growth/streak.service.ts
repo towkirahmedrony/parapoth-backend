@@ -3,13 +3,50 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { sendRewardNotification } from '../notifications/notifications.service';
 
 export const getStreakStats = async (userId: string) => {
-  const { data: profile, error: profileErr } = await supabase.from('profiles').select('current_streak, total_xp, coin_balance, freezes_left').eq('id', userId).single();
+  const { data: profile, error: profileErr } = await supabase
+    .from('profiles')
+    .select('current_streak, total_xp, coin_balance, freezes_left')
+    .eq('id', userId)
+    .single();
+    
   if (profileErr) throw profileErr;
+
+  let currentStreak = profile.current_streak || 0;
+
+  // Lazy Streak Reset Check
+  if (currentStreak > 0) {
+    const bdTime = new Date(new Date().getTime() + 6 * 60 * 60 * 1000);
+    const todayDate = new Date(bdTime.toISOString().split('T')[0]);
+
+    const { data: lastActivity } = await supabaseAdmin
+      .from('user_daily_activities')
+      .select('activity_date, exams_taken, used_freeze')
+      .eq('user_id', userId)
+      .order('activity_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastActivity) {
+      const lastActivityDate = new Date(lastActivity.activity_date);
+      const diffTime = Math.abs(todayDate.getTime() - lastActivityDate.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      if (diffDays >= 2) {
+        await supabaseAdmin.from('profiles').update({ current_streak: 0 }).eq('id', userId);
+        currentStreak = 0;
+      }
+    }
+  }
+
   const { data: longestStreakData, error: rpcErr } = await supabase.rpc('get_longest_streak', { p_user_id: userId });
   if (rpcErr) throw rpcErr;
+  
   return {
-    current_streak: profile.current_streak || 0, total_xp: profile.total_xp || 0, coin_balance: profile.coin_balance || 0,
-    freezesLeft: profile.freezes_left ?? 2, freezes_left: profile.freezes_left ?? 2,
+    current_streak: currentStreak, 
+    total_xp: profile.total_xp || 0, 
+    coin_balance: profile.coin_balance || 0,
+    freezesLeft: profile.freezes_left ?? 2, 
+    freezes_left: profile.freezes_left ?? 2,
     longest_streak: longestStreakData && longestStreakData.length > 0 ? longestStreakData[0] : null
   };
 };
