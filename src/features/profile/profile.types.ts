@@ -9,6 +9,11 @@ export interface UserProfile {
   group?: string;
   education_board?: string;
   batch_year?: string;
+  gender?: string;
+  study_goal?: string;
+  address?: any;
+  date_of_birth?: string;      // নতুন যুক্ত করা হলো
+  guardian_phone?: string;     // নতুন যুক্ত করা হলো
   total_xp: number;
   pvp_rating: number;
   current_streak: number;
@@ -18,6 +23,7 @@ export interface UserProfile {
 }
 
 export interface UpdateProfileDto {
+  username?: string;           // নতুন যুক্ত করা হলো
   full_name?: string;
   bio?: string;
   avatar_url?: string;
@@ -26,6 +32,11 @@ export interface UpdateProfileDto {
   group?: string;
   education_board?: string;
   batch_year?: string;
+  gender?: string;
+  study_goal?: string;
+  address?: any;
+  date_of_birth?: string;      // নতুন যুক্ত করা হলো
+  guardian_phone?: string;     // নতুন যুক্ত করা হলো
 }
 
 export interface ActivityPoint {

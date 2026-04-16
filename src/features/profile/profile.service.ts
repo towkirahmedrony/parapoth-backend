@@ -32,12 +32,10 @@ export class ProfileService {
     return updated;
   }
 
-  // নতুন মেথড: ইউজারের থিম প্রেফারেন্স আপডেট করার জন্য
+  // থিম প্রেফারেন্স আপডেট করার জন্য
   static async updateThemePreference(userId: string, theme: string) {
-    // ইউজারের বর্তমান সেটিংস ফেচ করা
     const { data: profile } = await supabase.from('profiles').select('settings').eq('id', userId).single();
     
-    // JSON অবজেক্ট মার্জ করা যাতে অন্য কোনো সেটিংস মুছে না যায়
     const currentSettings = (profile?.settings as Record<string, any>) || {};
     const updatedSettings = { ...currentSettings, theme };
 
@@ -64,15 +62,18 @@ export class ProfileService {
   }
 
   static async getUserBadges(userId: string) {
-    const { data, error } = await supabase.from('user_badges').select(`earned_at, badge:achievements_master (id, title, description, icon_url, rarity)`).eq('user_id', userId);
+    // ডাটাবেজে user_badges টেবিল না থাকায় profiles এর achievements JSON থেকে ডাটা নেওয়া হচ্ছে
+    const { data, error } = await supabase.from('profiles').select('achievements').eq('id', userId).single();
     if (error) throw error;
-    return data;
+    return data?.achievements || [];
   }
 
   static async getActivityStats(userId: string) {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const { data, error } = await supabase.from('exam_history').select('created_at, earned_xp').eq('user_id', userId).gte('created_at', sevenDaysAgo.toISOString());
+    
+    // ডাটাবেজে earned_xp না থাকায় score সিলেক্ট করা হয়েছে
+    const { data, error } = await supabase.from('exam_history').select('created_at, score').eq('user_id', userId).gte('created_at', sevenDaysAgo.toISOString());
     if (error) throw error;
 
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -81,7 +82,10 @@ export class ProfileService {
     data.forEach((entry: any) => {
       const dayName = days[new Date(entry.created_at).getDay()];
       const dayObj = stats.find(s => s.day === dayName);
-      if (dayObj) { dayObj.exams += 1; dayObj.xp += entry.earned_xp || 0; }
+      if (dayObj) { 
+        dayObj.exams += 1; 
+        dayObj.xp += entry.score || 0; // আপাতত score কেই xp হিসেবে ধরা হয়েছে
+      }
     });
 
     return stats;
