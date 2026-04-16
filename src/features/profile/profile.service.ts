@@ -52,7 +52,10 @@ export class ProfileService {
 
   static async getPublicProfile(identifier: string) {
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-5][0-9a-f]{3}-[089ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(identifier);
-    let query = supabase.from('profiles').select('id, username, full_name, avatar_url, bio, total_xp, pvp_rating, current_streak, batch_year');
+    
+    // 🟢 FIX: এখানে নতুন ফিল্ডগুলো (institution, pvp_matches_played ইত্যাদি) select কুয়েরিতে যুক্ত করা হয়েছে
+    let query = supabase.from('profiles').select('id, username, full_name, avatar_url, bio, total_xp, pvp_rating, current_streak, batch_year, institution, class_level, education_board, study_goal, pvp_matches_played, pvp_matches_won, pvp_win_streak');
+    
     if (isUUID) query = query.eq('id', identifier);
     else query = query.eq('username', identifier);
     
@@ -62,7 +65,6 @@ export class ProfileService {
   }
 
   static async getUserBadges(userId: string) {
-    // ডাটাবেজে user_badges টেবিল না থাকায় profiles এর achievements JSON থেকে ডাটা নেওয়া হচ্ছে
     const { data, error } = await supabase.from('profiles').select('achievements').eq('id', userId).single();
     if (error) throw error;
     return data?.achievements || [];
@@ -72,7 +74,6 @@ export class ProfileService {
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     
-    // ডাটাবেজে earned_xp না থাকায় score সিলেক্ট করা হয়েছে
     const { data, error } = await supabase.from('exam_history').select('created_at, score').eq('user_id', userId).gte('created_at', sevenDaysAgo.toISOString());
     if (error) throw error;
 
@@ -84,7 +85,7 @@ export class ProfileService {
       const dayObj = stats.find(s => s.day === dayName);
       if (dayObj) { 
         dayObj.exams += 1; 
-        dayObj.xp += entry.score || 0; // আপাতত score কেই xp হিসেবে ধরা হয়েছে
+        dayObj.xp += entry.score || 0; 
       }
     });
 
