@@ -7,8 +7,8 @@ const router = Router();
 // Protect all growth/streak routes, user must be logged in
 router.use(requireAuth);
 
-router.get('/stats', StreakController.getStreakStats);
-router.get('/heatmap', StreakController.getHeatmap);
-router.get('/quests', StreakController.getDailyQuests);
+router.get('/stats/:userId?', StreakController.getStreakStats);
+router.get('/heatmap/:userId?', StreakController.getHeatmap);
+router.get('/quests/:userId?', StreakController.getDailyQuests);
 
 export default router;

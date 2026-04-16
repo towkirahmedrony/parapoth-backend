@@ -4,8 +4,8 @@ import sendResponse from '../../lib/utils/response';
 import * as StreakService from './streak.service';
 
 export const getStreakStats = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user!.id; // Assuming `requireAuth` middleware populates `req.user`
-  const stats = await StreakService.getStreakStats(userId);
+  const targetUserId = req.params.userId || req.user!.id; 
+  const stats = await StreakService.getStreakStats(targetUserId);
   
   sendResponse(res, {
     statusCode: 200,
@@ -16,8 +16,8 @@ export const getStreakStats = catchAsync(async (req: Request, res: Response) => 
 });
 
 export const getHeatmap = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const heatmap = await StreakService.getHeatmap(userId);
+  const targetUserId = req.params.userId || req.user!.id;
+  const heatmap = await StreakService.getHeatmap(targetUserId);
   
   sendResponse(res, {
     statusCode: 200,
@@ -28,8 +28,8 @@ export const getHeatmap = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const getDailyQuests = catchAsync(async (req: Request, res: Response) => {
-  const userId = req.user!.id;
-  const quests = await StreakService.getDailyQuests(userId);
+  const targetUserId = req.params.userId || req.user!.id;
+  const quests = await StreakService.getDailyQuests(targetUserId);
   
   sendResponse(res, {
     statusCode: 200,
