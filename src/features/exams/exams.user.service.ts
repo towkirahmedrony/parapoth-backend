@@ -69,7 +69,7 @@ export class ExamUserService {
        const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
           exam_history_id: data.id,
           question_id: d.question_id,
-          selected_option: d.selected_option || null,
+          selected_option: typeof d.selected_option === 'object' ? JSON.stringify(d.selected_option) : d.selected_option || null,
           is_correct: d.is_correct || false,
           marks_awarded: d.marks_awarded || 0
        }));
@@ -80,7 +80,8 @@ export class ExamUserService {
             user_id: userId,
             exam_id: payload.exam_id || null,
             question_id: d.question_id,
-            selected_option: d.selected_option
+            // 👇 ফিক্স: অবজেক্ট থাকলে স্ট্রিংয়ে রূপান্তর করা হচ্ছে
+            selected_option: typeof d.selected_option === 'object' ? JSON.stringify(d.selected_option) : d.selected_option
          }));
 
        const promises = [];
@@ -142,13 +143,14 @@ export class ExamUserService {
            user_id: user_id,
            exam_id: exam_id,
            question_id: q.id,
-           selected_option: userAnswerId
+           // 👇 ফিক্স: অবজেক্ট থাকলে স্ট্রিংয়ে রূপান্তর করা হচ্ছে
+           selected_option: typeof userAnswerId === 'object' ? JSON.stringify(userAnswerId) : userAnswerId
         });
       }
 
       detailsToInsert.push({
         question_id: q.id,
-        selected_option: userAnswerId || null,
+        selected_option: typeof userAnswerId === 'object' ? JSON.stringify(userAnswerId) : userAnswerId || null,
         is_correct: isCorrect,
         marks_awarded: marksAwarded
       });
