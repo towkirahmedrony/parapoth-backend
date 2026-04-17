@@ -3,6 +3,9 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { sendRewardNotification } from '../notifications/notifications.service';
 
 export const getStreakStats = async (userId: string) => {
+  // 🐛 ডিবাগ করার জন্য এই লগটি যোগ করা হলো: Render আসলে কোন লিংকে হিট করছে?
+  console.log("Current Backend DB URL:", process.env.SUPABASE_URL);
+
   const { data: profile, error: profileErr } = await supabase
     .from('profiles')
     .select('current_streak, total_xp, coin_balance, freezes_left')
