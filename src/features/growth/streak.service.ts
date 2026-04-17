@@ -3,9 +3,9 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { sendRewardNotification } from '../notifications/notifications.service';
 
 export const getStreakStats = async (userId: string) => {
-  // 🐛 ডিবাগ করার জন্য এই লগটি যোগ করা হলো: Render আসলে কোন লিংকে হিট করছে?
-  console.log("Current Backend DB URL:", process.env.SUPABASE_URL);
-
+  console.log("\n=== GET STREAK STATS DEBUG ===");
+  
+  console.log("[STEP 1] Fetching Profile...");
   const { data: profile, error: profileErr } = await supabase
     .from('profiles')
     .select('current_streak, total_xp, coin_balance, freezes_left')
@@ -16,12 +16,12 @@ export const getStreakStats = async (userId: string) => {
 
   let currentStreak = profile.current_streak || 0;
 
-  // Lazy Streak Reset Check
   if (currentStreak > 0) {
+    console.log("[STEP 2] Querying user_daily_activities via Admin...");
     const bdTime = new Date(new Date().getTime() + 6 * 60 * 60 * 1000);
     const todayStr = bdTime.toISOString().split('T')[0];
 
-    const { data: lastActivity } = await supabaseAdmin
+    const { data: lastActivity, error: activityErr } = await supabaseAdmin
       .from('user_daily_activities')
       .select('activity_date, exams_taken, used_freeze')
       .eq('user_id', userId)
@@ -29,28 +29,36 @@ export const getStreakStats = async (userId: string) => {
       .limit(1)
       .maybeSingle();
 
+    if (activityErr) {
+      console.log("❌ CRASHED AT STEP 2 (Supabase Admin Query)!");
+      throw activityErr;
+    }
+
     if (lastActivity && lastActivity.activity_date) {
       const lastActivityStr = lastActivity.activity_date.split('T')[0];
-      
       const tDate = new Date(todayStr);
       const lDate = new Date(lastActivityStr);
       const diffDays = Math.floor((tDate.getTime() - lDate.getTime()) / (1000 * 60 * 60 * 24));
 
       if (diffDays >= 2) {
-        console.log(`[Streak Reset] Resetting streak to 0 for user ${userId}`);
         await supabaseAdmin.from('profiles').update({ current_streak: 0 }).eq('id', userId);
         currentStreak = 0;
       }
     } else {
-      console.log(`[Streak Reset] No activity found. Resetting streak to 0 for user ${userId}`);
       await supabaseAdmin.from('profiles').update({ current_streak: 0 }).eq('id', userId);
       currentStreak = 0;
     }
   }
 
+  console.log("[STEP 3] Calling RPC get_longest_streak...");
   const { data: longestStreakData, error: rpcErr } = await supabase.rpc('get_longest_streak', { p_user_id: userId });
-  if (rpcErr) throw rpcErr;
   
+  if (rpcErr) {
+    console.log("❌ CRASHED AT STEP 3 (Database RPC Function)!");
+    throw rpcErr;
+  }
+  
+  console.log("=== DONE ===");
   return {
     current_streak: currentStreak, 
     total_xp: profile.total_xp || 0, 
