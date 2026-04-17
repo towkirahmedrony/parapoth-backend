@@ -33,6 +33,17 @@ export const leaderboardService = {
     }));
   },
 
+  // Fetch League Rules
+  async getLeaguesConfig() {
+    const { data, error } = await supabase
+      .from('levels_master')
+      .select('*')
+      .order('min_xp', { ascending: true });
+      
+    if (error) throw error;
+    return data;
+  },
+
   // Group/Squad Leaderboard
   async getGroupLeaderboard(userId: string) {
     // 1. Fetch top groups (using study_groups matching your supabase schema)

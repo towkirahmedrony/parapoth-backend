@@ -60,7 +60,7 @@ export const getGlobalThemeConfig = async () => {
   const { data, error } = await supabase
     .from('app_configs')
     .select('value')
-    .eq('key', 'theme_config') // 🟢 FIXED KEY
+    .eq('key', 'theme_config')
     .single();
 
   if (error && error.code !== 'PGRST116') throw error;
@@ -68,7 +68,7 @@ export const getGlobalThemeConfig = async () => {
 };
 
 // ==========================================
-// XP Rules (New specific service)
+// XP Rules 
 // ==========================================
 export const updateXPRules = async (rules: any) => {
   const { data, error } = await supabaseAdmin
@@ -152,7 +152,7 @@ export const resolveAdminAlert = async (id: string, adminId: string) => {
 };
 
 // ==========================================
-// Global Notice (Merged from Admin System)
+// Global Notice
 // ==========================================
 export const updateGlobalNotice = async (noticeData: any) => {
   const { data, error } = await supabaseAdmin
@@ -161,6 +161,38 @@ export const updateGlobalNotice = async (noticeData: any) => {
     .select()
     .single();
 
+  if (error) throw error;
+  return data;
+};
+
+// ==========================================
+// Leaderboard Levels Configuration
+// ==========================================
+export const getLevels = async () => {
+  const { data, error } = await supabase.from('levels_master').select('*').order('min_xp', { ascending: true });
+  if (error) throw error;
+  return data;
+};
+
+export const updateLevels = async (levels: any[]) => {
+  // 1. Get existing levels
+  const { data: existing } = await supabaseAdmin.from('levels_master').select('id');
+  const incomingIds = levels.filter(l => l.id).map(l => l.id);
+  const toDelete = existing?.map(e => e.id).filter(id => !incomingIds.includes(id)) || [];
+
+  // 2. Delete removed levels
+  if (toDelete.length > 0) {
+    await supabaseAdmin.from('levels_master').delete().in('id', toDelete);
+  }
+
+  // 3. Upsert incoming levels
+  const validUpserts = levels.map(l => {
+    const item = { ...l };
+    if (!item.id) delete item.id; // DB will generate ID for new ones
+    return item;
+  });
+
+  const { data, error } = await supabaseAdmin.from('levels_master').upsert(validUpserts).select();
   if (error) throw error;
   return data;
 };

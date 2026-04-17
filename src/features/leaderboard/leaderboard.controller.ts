@@ -25,6 +25,17 @@ export const getLeagueLeaderboard = catchAsync(async (req: Request, res: Respons
   });
 });
 
+export const getLeaguesConfig = catchAsync(async (req: Request, res: Response) => {
+  const data = await leaderboardService.getLeaguesConfig();
+  
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Leagues configuration fetched successfully',
+    data
+  });
+});
+
 export const getSquadLeaderboard = catchAsync(async (req: Request, res: Response) => {
   const userId = (req as any).user?.id;
 

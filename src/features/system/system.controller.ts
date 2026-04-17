@@ -6,7 +6,6 @@ import speakeasy from 'speakeasy';
 import nodemailer from 'nodemailer';
 import { supabase } from '../../config/supabase';
 
-// ... (requestAdminOTP code) ...
 export const requestAdminOTP = catchAsync(async (req: Request, res: Response) => {
   const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -86,7 +85,6 @@ export const updateAppConfig = catchAsync(async (req: Request, res: Response) =>
   sendResponse(res, { statusCode: 200, success: true, message: 'Config updated', data: config });
 });
 
-// New controller specifically for XP Rules
 export const updateXPRules = catchAsync(async (req: Request, res: Response) => {
   const rules = req.body;
   const data = await SystemService.updateXPRules(rules);
@@ -117,7 +115,6 @@ export const getThemeConfig = catchAsync(async (req: Request, res: Response) => 
   sendResponse(res, { statusCode: 200, success: true, message: 'Theme configuration fetched successfully', data: theme });
 });
 
-// Global Notice 
 export const updateGlobalNotice = catchAsync(async (req: Request, res: Response) => {
   const notice = await SystemService.updateGlobalNotice(req.body);
   sendResponse(res, { statusCode: 200, success: true, message: 'Global notice updated successfully', data: notice });
@@ -185,4 +182,16 @@ export const resolveAdminAlert = catchAsync(async (req: Request, res: Response) 
   const alert = await SystemService.resolveAdminAlert(req.params.id, adminId);
   await SystemService.createAuditLog(adminId, 'RESOLVE', 'admin_alerts', req.params.id, { status: 'resolved' });
   sendResponse(res, { statusCode: 200, success: true, message: 'Alert resolved', data: alert });
+});
+
+export const getLevels = catchAsync(async (req: Request, res: Response) => {
+  const levels = await SystemService.getLevels();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Levels fetched successfully', data: levels });
+});
+
+export const updateLevels = catchAsync(async (req: Request, res: Response) => {
+  const { levels } = req.body;
+  const data = await SystemService.updateLevels(levels);
+  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'levels_master', 'bulk_update', levels);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Levels updated successfully', data });
 });

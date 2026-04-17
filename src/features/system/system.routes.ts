@@ -33,6 +33,10 @@ router.post('/configs/:key', adminGuard, SystemController.updateAppConfig);
 // XP Rules specific route
 router.put('/xp-rules', adminGuard, SystemController.updateXPRules);
 
+// League Levels
+router.get('/levels', adminGuard, SystemController.getLevels);
+router.put('/levels', adminGuard, SystemController.updateLevels);
+
 router.get('/emergency-flags', adminGuard, SystemController.getEmergencyFlags);
 router.post('/emergency-flags', adminGuard, SystemController.createEmergencyFlag);
 router.patch('/emergency-flags/:key', adminGuard, SystemController.toggleEmergencyFlag);

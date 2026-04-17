@@ -7,6 +7,7 @@ const router = Router();
 // সব রুটেই অথেন্টিকেশন প্রয়োজন
 router.use(requireAuth);
 
+router.get('/leagues', leaderboardController.getLeaguesConfig);
 router.get('/league', leaderboardController.getLeagueLeaderboard);
 router.get('/squads', leaderboardController.getSquadLeaderboard);
 
