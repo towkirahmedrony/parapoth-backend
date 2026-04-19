@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { generateExam, submitExam, getArena, submitHistory, createGroupBattle } from './exams.user.controller';
+import { generateExam, submitExam, getArena, submitHistory, createGroupBattle, toggleBookmark } from './exams.user.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 
 const router = Router();
@@ -11,5 +11,8 @@ router.post('/submit', requireAuth, submitExam);
 
 // নতুন রাউট: Group Battle এর জন্য
 router.post('/group-battle', requireAuth, createGroupBattle);
+
+// 🌟 নতুন রাউট: Bookmark এর জন্য
+router.post('/bookmark', requireAuth, toggleBookmark);
 
 export const ExamUserRoutes = router;

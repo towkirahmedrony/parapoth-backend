@@ -212,4 +212,26 @@ export class ExamUserService {
     
     return data;
   }
+
+  // 🌟 নতুন ফাংশন: বুকমার্ক টগল করার জন্য
+  static async toggleBookmark(userId: string, questionId: string) {
+    const { data: existing, error: fetchError } = await supabase
+      .from('bookmarks')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('question_id', questionId)
+      .maybeSingle();
+
+    if (fetchError) throw new Error(fetchError.message);
+
+    if (existing) {
+      const { error } = await supabase.from('bookmarks').delete().eq('id', existing.id);
+      if (error) throw new Error(error.message);
+      return { message: 'বুকমার্ক রিমুভ করা হয়েছে', isBookmarked: false };
+    } else {
+      const { error } = await supabase.from('bookmarks').insert([{ user_id: userId, question_id: questionId }]);
+      if (error) throw new Error(error.message);
+      return { message: 'বুকমার্ক যুক্ত করা হয়েছে', isBookmarked: true };
+    }
+  }
 }

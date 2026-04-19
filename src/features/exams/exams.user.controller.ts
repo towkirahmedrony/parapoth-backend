@@ -58,3 +58,22 @@ export const createGroupBattle = catchAsync(async (req: Request, res: Response) 
     data: result 
   });
 });
+
+// 🌟 নতুন কন্ট্রোলার: বুকমার্ক টগল করার জন্য
+export const toggleBookmark = catchAsync(async (req: Request, res: Response) => {
+  const userId = (req as any).user?.id || req.body.user_id;
+  const { questionId } = req.body;
+
+  if (!questionId) {
+    throw new Error('Question ID প্রয়োজন!');
+  }
+
+  const result = await ExamUserService.toggleBookmark(userId, questionId);
+
+  sendResponse(res, { 
+    statusCode: 200, 
+    success: true, 
+    message: result.message, 
+    data: result 
+  });
+});

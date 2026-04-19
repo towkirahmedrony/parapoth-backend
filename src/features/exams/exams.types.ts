@@ -35,3 +35,7 @@ export interface PunishUserDTO {
   userId: string;
   action: 'zero_marks' | 'ban_device';
 }
+
+export interface ToggleBookmarkDTO {
+  questionId: string;
+}
