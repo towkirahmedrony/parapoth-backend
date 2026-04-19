@@ -1,7 +1,7 @@
 import { supabase } from '../../config/supabase';
 import { ProgressDashboardResponse } from './progress.types';
 
-// Python API URL (টারমাক্সে লোকালহোস্টে রান করার জন্য)
+// Python API URL (Env থেকে নিবে, না পেলে লোকালহোস্ট)
 const PYTHON_AI_SERVICE_URL = process.env.PYTHON_AI_SERVICE_URL || 'http://127.0.0.1:8000/api/v1/analyze-progress';
 
 export const getProgressDashboardData = async (userId: string): Promise<ProgressDashboardResponse> => {
@@ -16,7 +16,6 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     console.error("Profile Fetch Error:", profileError);
   }
 
-  // 👉 ডিবাগ করার জন্য টার্মিনালে প্রোফাইলের ডেটা প্রিন্ট করা হলো
   console.log("🚀 Database Profile Data for User ID", userId, ":", profile);
 
   // 2. Fetch Aggregated Metrics
@@ -107,7 +106,9 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
       avg_score: Number(avgScore.toFixed(1))
     };
 
-    // Node 18+ এ ডিফল্টভাবেই fetch কাজ করে
+    console.log("👉 Target AI URL:", PYTHON_AI_SERVICE_URL); 
+    console.log("📤 Sending payload to AI:", JSON.stringify(studentDataForAI));
+
     const aiResponse = await fetch(PYTHON_AI_SERVICE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -116,14 +117,15 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
 
     if (aiResponse.ok) {
       const aiResult = await aiResponse.json();
-      aiInsights = aiResult.data;
+      // রেসপন্সে সরাসরি ডেটা থাকলে aiResult, আর data অবজেক্টের ভেতর থাকলে aiResult.data
+      aiInsights = aiResult.data || aiResult; 
       console.log("✅ AI Insights Fetched Successfully");
     } else {
-      console.error("⚠️ AI Service returned status:", aiResponse.status);
+      const errorText = await aiResponse.text();
+      console.error(`⚠️ AI Service Failed! Status: ${aiResponse.status}, Error Details: ${errorText}`);
     }
   } catch (error) {
-    console.error("❌ Failed to fetch AI insights from Python service:", error);
-    // AI সার্ভিস ডাউন থাকলে বা টারমাক্সে না চললে যেন ড্যাশবোর্ড ক্র্যাশ না করে, তাই error catch করা হলো
+    console.error("❌ API Fetch Network Error:", (error as Error).message);
   }
 
   // 8. রিটার্ন ডেটা
@@ -144,7 +146,6 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     weaknesses,
     focusTopic: aiInsights?.focus_action || (weaknesses.length > 0 ? weaknesses[0].topic : 'General Revision'),
     subjectReport,
-    // AI ডেটা অবজেক্টে যুক্ত করা হলো
     aiAnalysis: aiInsights || {
       strong_points: [],
       weak_points: [],
