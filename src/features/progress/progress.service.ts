@@ -1,11 +1,10 @@
 import { supabase } from '../../config/supabase';
 import { ProgressDashboardResponse } from './progress.types';
 
-// Python API URL (Env থেকে নিবে, না পেলে লোকালহোস্ট)
 const PYTHON_AI_SERVICE_URL = process.env.PYTHON_AI_SERVICE_URL || 'http://127.0.0.1:8000/api/v1/analyze-progress';
 
 export const getProgressDashboardData = async (userId: string): Promise<ProgressDashboardResponse> => {
-  // 1. ডাটাবেইজ থেকে প্রোফাইল ফেচ করা হচ্ছে
+  // ১. প্রোফাইল ডেটা ফেচ
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('full_name, batch_year, current_streak, total_xp')
@@ -16,9 +15,7 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     console.error("Profile Fetch Error:", profileError);
   }
 
-  console.log("🚀 Database Profile Data for User ID", userId, ":", profile);
-
-  // 2. Fetch Aggregated Metrics
+  // ২. মেট্রিক্স হিসাব করা
   const { data: metricsData } = await supabase
     .from('exam_history')
     .select('score, total_marks')
@@ -29,7 +26,7 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     ? metricsData!.reduce((acc, curr) => acc + (curr.score / curr.total_marks) * 100, 0) / totalExams 
     : 0;
 
-  // 3. Fetch Performance Chart Data
+  // ৩. পারফরম্যান্স চার্ট ডেটা
   const { data: recentExams } = await supabase
     .from('exam_history')
     .select('created_at, score, total_marks')
@@ -42,13 +39,11 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     score: Math.round((exam.score / exam.total_marks) * 100)
   })) || [];
 
-  // 4. Fetch Subject Analysis & Radar Data
+  // ৪. সাবজেক্ট অ্যানালাইটিক্স
   const { data: subjectStats } = await supabase
     .rpc('get_student_subject_analytics', { p_user_id: userId });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const skillMapping: any[] = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const subjectReport: any[] = [];
 
   if (subjectStats) {
@@ -69,7 +64,7 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     }
   }
 
-  // 5. Fetch Activity Heatmap
+  // ৫. অ্যাক্টিভিটি হিটম্যাপ
   const { data: heatmapRaw } = await supabase
     .from('user_daily_activities')
     .select('activity_date, exams_taken')
@@ -82,20 +77,18 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
     exams_taken: h.exams_taken
   })) || [];
 
-  // 6. Fetch Weaknesses
+  // ৬. দুর্বলতা চিহ্নিত করা
   const { data: weaknessRaw } = await supabase
     .rpc('get_student_weaknesses', { p_user_id: userId })
     .limit(3);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const weaknesses = weaknessRaw?.map((w: any) => ({
     topic: w.topic_name,
     subject: w.subject_name,
     errorRate: `${Math.round(w.error_rate)}%`
   })) || [];
 
-  // 7. 🔥 Fetch AI Insights from Python Microservice 🔥
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // ৭. এআই ইনসাইট ফেচ
   let aiInsights: any = null;
   
   try {
@@ -106,9 +99,6 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
       avg_score: Number(avgScore.toFixed(1))
     };
 
-    console.log("👉 Target AI URL:", PYTHON_AI_SERVICE_URL); 
-    console.log("📤 Sending payload to AI:", JSON.stringify(studentDataForAI));
-
     const aiResponse = await fetch(PYTHON_AI_SERVICE_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -117,18 +107,13 @@ export const getProgressDashboardData = async (userId: string): Promise<Progress
 
     if (aiResponse.ok) {
       const aiResult = await aiResponse.json();
-      // রেসপন্সে সরাসরি ডেটা থাকলে aiResult, আর data অবজেক্টের ভেতর থাকলে aiResult.data
-      aiInsights = aiResult.data || aiResult; 
-      console.log("✅ AI Insights Fetched Successfully");
-    } else {
-      const errorText = await aiResponse.text();
-      console.error(`⚠️ AI Service Failed! Status: ${aiResponse.status}, Error Details: ${errorText}`);
+      aiInsights = aiResult.data || aiResult;
     }
   } catch (error) {
-    console.error("❌ API Fetch Network Error:", (error as Error).message);
+    console.error("AI Insights fetch failed");
   }
 
-  // 8. রিটার্ন ডেটা
+  // ৮. ফাইনাল রেসপন্স রিটার্ন
   return {
     user: {
       name: profile?.full_name || 'Student',
