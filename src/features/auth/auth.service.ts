@@ -12,7 +12,6 @@ export const authService = {
     if (data.account_status !== 'active') throw new Error(`Account ${data.account_status}. Please contact support.`);
     
     // --- Auto Referral Logic ---
-    // ব্যাকগ্রাউন্ডে চেক করবে ইউজারের মেটাডেটাতে কোনো রেফারেল কোড আছে কিনা
     this.checkAndProcessReferral(userId).catch(err => 
       console.error('Background auto-referral processing error:', err)
     );
@@ -21,13 +20,11 @@ export const authService = {
   },
 
   async checkAndProcessReferral(userId: string): Promise<void> {
-    // Auth টেবিল থেকে ইউজার মেটাডেটা আনা
     const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(userId);
     if (error || !userData?.user) return;
 
     const referredByCode = userData.user.user_metadata?.referred_by_code;
     
-    // যদি কোড থাকে, তাহলে রেফারেল প্রসেস করা
     if (referredByCode) {
       await ReferralService.processAutoReferral(userId, referredByCode);
     }
@@ -94,8 +91,9 @@ export const authService = {
 
   async grantSignupXP(userId: string): Promise<void> {
     const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
-    const xp = (data?.value as any)?.signup_bonus || 50;
-    await supabase.rpc('update_user_progress', { p_coins: 0, p_user_id: userId, p_xp: xp });
+    // According to frontend: Signup Bonus (Coins for new user)
+    const coins = (data?.value as any)?.signup_bonus || 50; 
+    await supabase.rpc('update_user_progress', { p_coins: coins, p_user_id: userId, p_xp: 0 });
   },
 
   async grantProfileCompletionXP(userId: string): Promise<void> {

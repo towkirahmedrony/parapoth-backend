@@ -105,22 +105,28 @@ export const incrementStreakOnExamSubmit = async (userId: string) => {
       const { data: configData } = await supabaseAdmin.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
       const rules = (configData?.value as any) || {};
 
-      let xpReward = rules.daily_login || 10;
+      // Separated XP and Coin logic
+      let xpReward = rules.daily_login_xp || 10;
+      let coinReward = rules.daily_login_coins || 5;
+      
       let notifTitle = "ডেইলি গোল পূরণ! 🎉";
-      let notifBody = `আজকের প্রথম পড়ার জন্য আপনি পেয়েছেন ${xpReward} XP!`;
+      let notifBody = `আজকের প্রথম পড়ার জন্য আপনি পেয়েছেন ${xpReward} XP এবং ${coinReward} Coins!`;
 
       if (newStreak > 0 && newStreak % 30 === 0) {
-        xpReward += (rules.streak_30_days || 300);
+        xpReward += (rules.streak_30_days_xp || 300);
+        coinReward += (rules.streak_30_days_coins || 100);
         notifTitle = "🔥 ৩০ দিনের ফায়ার স্ট্রিক!";
-        notifBody = `অসাধারণ! টানা ৩০ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`;
+        notifBody = `অসাধারণ! টানা ৩০ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP এবং ${coinReward} Coins!`;
       } else if (newStreak > 0 && newStreak % 7 === 0) {
-        xpReward += (rules.streak_7_days || 50);
+        xpReward += (rules.streak_7_days_xp || 50);
+        coinReward += (rules.streak_7_days_coins || 20);
         notifTitle = "🔥 ৭ দিনের স্ট্রিক!";
-        notifBody = `দারুণ! টানা ৭ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`;
+        notifBody = `দারুণ! টানা ৭ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP এবং ${coinReward} Coins!`;
       }
 
-      await supabaseAdmin.rpc('update_user_progress', { p_user_id: userId, p_coins: 0, p_xp: xpReward });
-      await sendRewardNotification(userId, notifTitle, notifBody, 0, xpReward);
+      // Updating both coins and XP using RPC
+      await supabaseAdmin.rpc('update_user_progress', { p_user_id: userId, p_coins: coinReward, p_xp: xpReward });
+      await sendRewardNotification(userId, notifTitle, notifBody, 0, xpReward); // Notification function can be updated to accept coins later if needed
 
       if (activity) {
         await supabaseAdmin.from('user_daily_activities').update({ exams_taken: 1 }).eq('id', activity.id);
