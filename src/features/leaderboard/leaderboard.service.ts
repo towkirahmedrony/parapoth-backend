@@ -6,6 +6,7 @@ export const leaderboardService = {
     let query = supabase
       .from('profiles')
       .select('id, username, full_name, avatar_url, institution, total_xp, current_streak')
+      .eq('is_email_verified', true) // শুধুমাত্র ভেরিফাইড ইউজারদের দেখানোর জন্য এই ফিল্টারটি যোগ করা হয়েছে
       .gte('total_xp', minXp)
       .order('total_xp', { ascending: false })
       .limit(50);
