@@ -4,6 +4,9 @@ export type UserProfile = Database['public']['Tables']['profiles']['Row'];
 export type Device = Database['public']['Tables']['user_devices']['Row'];
 export type CoinTransaction = Database['public']['Tables']['coin_transactions']['Row'];
 export type PaymentRequest = Database['public']['Tables']['payment_requests']['Row'];
+export type UserWarning = Database['public']['Tables']['user_warnings']['Row'];
+export type SupportTicket = Database['public']['Tables']['user_reports']['Row'];
+export type AuditLog = Database['public']['Tables']['audit_logs']['Row'];
 
 export interface User360Response {
   profile: UserProfile;
@@ -20,9 +23,14 @@ export interface User360Response {
   };
   subscription_history: any[];
   coin_transactions: CoinTransaction[];
-  fiat_payments: PaymentRequest[];
+  payment_requests: PaymentRequest[];
   quests: any[];
   devices: Device[];
-  support_tickets: any[];
-  audit_logs: any[];
+  support_tickets: SupportTicket[];
+  audit_logs: AuditLog[];
+  warnings: UserWarning[];
+  focus_sessions_joined?: number;
+  focus_sessions_started?: number;
+  total_focus_minutes?: number;
+  longest_streak?: number;
 }
