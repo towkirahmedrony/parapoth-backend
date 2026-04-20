@@ -37,8 +37,11 @@ export const adjustBalance = catchAsync(async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
     const { amount, reason } = req.body;
-    // TODO: Add logic to insert coin_transaction and update profiles.coin_balance
-    return sendResponse(res, 200, true, 'User balance adjusted successfully', { userId, amount });
+    
+    // ডাটাবেজ আপডেটের সার্ভিস ফাংশনটি কল করা হলো
+    const result = await UsersAdminService.adjustUserBalance(userId, amount, reason);
+
+    return sendResponse(res, 200, true, 'User balance adjusted successfully', result);
   } catch (error: any) {
     return sendResponse(res, 500, false, error.message || 'Internal Server Error');
   }

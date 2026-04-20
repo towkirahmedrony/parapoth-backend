@@ -14,6 +14,48 @@ export const getAllUsers = async () => {
   return data;
 };
 
+export const adjustUserBalance = async (userId: string, amount: number, reason: string) => {
+  // ১. ইউজারের বর্তমান ব্যালেন্স চেক করা
+  const { data: user, error: fetchError } = await supabase
+    .from('profiles')
+    .select('coin_balance')
+    .eq('id', userId)
+    .single();
+
+  if (fetchError || !user) {
+    throw new Error('User not found in database.');
+  }
+
+  const currentBalance = user.coin_balance || 0;
+  const newBalance = currentBalance + amount;
+
+  // ২. profiles টেবিলে নতুন ব্যালেন্স আপডেট করা
+  const { error: updateError } = await supabase
+    .from('profiles')
+    .update({ coin_balance: newBalance })
+    .eq('id', userId);
+
+  if (updateError) {
+    throw new Error('Failed to update user balance in database.');
+  }
+
+  // ৩. অডিট লগের জন্য coin_transactions টেবিলে রেকর্ড রাখা
+  const { error: logError } = await supabase
+    .from('coin_transactions')
+    .insert({
+      user_id: userId,
+      amount: amount,
+      transaction_type: 'admin_adjustment',
+      description: reason
+    });
+
+  if (logError) {
+    console.error("Failed to save transaction log:", logError);
+  }
+
+  return { newBalance };
+};
+
 export const getUser360Profile = async (userId: string): Promise<User360Response> => {
   const { data: profile, error: profileErr } = await supabase
     .from('profiles')
@@ -40,7 +82,7 @@ export const getUser360Profile = async (userId: string): Promise<User360Response
 
   // Fetching focus sessions manually for aggregation
   const focusStarted = await supabase.from('group_focus_sessions').select('id, duration_minutes').eq('started_by', userId);
-  const totalFocusMins = focusStarted.data?.reduce((acc, curr) => acc + (curr.duration_minutes || 0), 0) || 0;
+  const totalFocusMins = focusStarted.data?.reduce((acc: any, curr: any) => acc + (curr.duration_minutes || 0), 0) || 0;
 
   return {
     profile,
