@@ -20,16 +20,12 @@ router.get('/comprehensions/search', rbacGuard(['admin', 'moderator', 'teacher']
 router.get('/questions/audit', rbacGuard(['admin', 'moderator']), contentController.getQuestionsForAudit);
 router.patch('/questions/:id/status', rbacGuard(['admin', 'moderator']), contentController.updateAuditQuestionStatus);
 
-// ==========================================
-// 🚀 ADDED: Question Bank Routes
-// ==========================================
 router.get('/questions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.getQuestionsBank);
-router.delete('/questions/:id/hard', rbacGuard(['admin']), contentController.hardDeleteQuestion);
-
 router.post('/questions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.createQuestion);
 router.post('/questions/bulk', rbacGuard(['admin', 'moderator', 'teacher']), contentController.bulkCreateQuestions);
 router.put('/questions/:id', rbacGuard(['admin', 'moderator', 'teacher']), contentController.updateQuestion);
-router.delete('/questions/:id', rbacGuard(['admin', 'moderator']), contentController.deleteQuestion); // Soft Delete
+router.delete('/questions/:id', rbacGuard(['admin', 'moderator']), contentController.deleteQuestion);
+router.delete('/questions/:id/hard', rbacGuard(['admin']), contentController.hardDeleteQuestion);
 
 router.get('/ai-review-queue', rbacGuard(['admin', 'moderator']), contentController.getAiReviewQueue);
 router.post('/ai-review-queue/:id/review', rbacGuard(['admin', 'moderator']), contentController.reviewQuestion);

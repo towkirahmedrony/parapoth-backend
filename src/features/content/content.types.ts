@@ -1,5 +1,21 @@
 export type NodeType = 'subject' | 'chapter' | 'topic';
 
+export const QUESTION_STATUSES = [
+  'draft',
+  'review',
+  'approved',
+  'rejected',
+  'published',
+  'deleted',
+  'flagged',
+  'pending',
+] as const;
+
+export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
+
+export const AUDITABLE_STATUSES = ['approved', 'rejected', 'flagged'] as const;
+export type AuditableStatus = (typeof AUDITABLE_STATUSES)[number];
+
 export interface CurriculumNode {
   id: string;
   name_en: string;
@@ -9,7 +25,7 @@ export interface CurriculumNode {
   is_active: boolean;
   is_premium?: boolean;
   slug?: string;
-  description?: string;
+  description?: string | null;
   icon_url?: string | null;
   curriculum_version?: string | null;
   language?: string | null;
@@ -17,6 +33,10 @@ export interface CurriculumNode {
   subject_id?: string;
   chapter_id?: string;
 }
+
+export type QuestionBody = Record<string, unknown>;
+export type QuestionOption = Record<string, unknown>;
+export type ExamReference = Record<string, unknown>;
 
 export interface QuestionPayload {
   subject_id: string;
@@ -26,17 +46,18 @@ export interface QuestionPayload {
   type: string;
   difficulty_level: string;
   source_type?: string | null;
-  body: Record<string, any>;
-  options: Record<string, any>[];
-  explanation?: string;
+  body: QuestionBody;
+  options: QuestionOption[];
+  explanation?: unknown;
   media_id?: string | null;
   explanation_media_id?: string | null;
   tags?: string[];
-  exam_references?: Record<string, any>[];
-  status: 'draft' | 'review' | 'approved' | 'rejected' | 'published' | 'deleted' | 'flagged' | 'pending';
+  exam_references?: ExamReference[];
+  status?: QuestionStatus;
   created_by?: string;
   is_embedding_stale?: boolean;
-  confidence_score?: number; // Added for Audit
+  confidence_score?: number;
+  content_hash?: string;
 }
 
 export interface ComprehensionPayload {
@@ -44,17 +65,45 @@ export interface ComprehensionPayload {
   chapter_id?: string;
   topic_id?: string;
   body: string;
-  media_id?: string;
+  media_id?: string | null;
 }
 
 export interface SyncIndexPayload {
   type: 'vector' | 'global';
 }
 
-// Added for Audit filtering
 export interface AuditFilterParams {
   status?: string;
   difficulty?: string;
   subject_id?: string;
   search?: string;
+}
+
+export interface QuestionBankFilters {
+  subject_id?: string;
+  difficulty?: string;
+  type?: string;
+  status?: string;
+  search?: string;
+}
+
+export interface BulkComprehensionQuestionInput extends Partial<QuestionPayload> {
+  subject_id?: string;
+  chapter_id?: string;
+  topic_id?: string;
+}
+
+export interface BulkQuestionGroupInput {
+  type?: string;
+  passage?: string | Record<string, unknown>;
+  subject_id?: string;
+  chapter_id?: string;
+  topic_id?: string;
+  questions?: BulkComprehensionQuestionInput[];
+}
+
+export type BulkQuestionInput = QuestionPayload | BulkQuestionGroupInput;
+
+export interface AuthenticatedUser {
+  id: string;
 }

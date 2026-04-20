@@ -1,6 +1,19 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { supabase } from '../../config/supabase';
-import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams } from './content.types';
+import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams, QuestionBankFilters } from './content.types';
+
+// ইম্পোর্ট পাথ আপনার দেওয়া লোকেশন অনুযায়ী আপডেট করা হয়েছে
+import type { TablesInsert, TablesUpdate } from '../../types/database.type';
+
+const generateContentHash = (questionData: Record<string, unknown>): string => {
+  const coreContent = {
+    body: questionData.body,
+    options: questionData.options,
+    type: questionData.type,
+    difficulty_level: questionData.difficulty_level
+  };
+  return createHash('sha256').update(JSON.stringify(coreContent)).digest('hex');
+};
 
 export const getSubjects = async () => {
   const { data, error } = await supabase
@@ -53,54 +66,51 @@ export const buildCurriculumTree = async (): Promise<CurriculumNode[]> => {
   const chapters = chaptersRes.data ?? [];
   const topics = topicsRes.data ?? [];
 
-  const topicsByChapter = topics.reduce((acc: Record<string, any[]>, topic: any) => {
-    if (!topic.chapter_id) return acc;
-    if (!acc[topic.chapter_id]) acc[topic.chapter_id] = [];
-    acc[topic.chapter_id].push({ ...topic, type: 'topic', children: [] });
+  const topicsByChapter = topics.reduce((acc: Record<string, unknown[]>, topic: Record<string, unknown>) => {
+    const chapterId = topic.chapter_id as string;
+    if (!chapterId) return acc;
+    if (!acc[chapterId]) acc[chapterId] = [];
+    acc[chapterId].push({ ...topic, type: 'topic', children: [] });
     return acc;
   }, {});
 
-  const chaptersBySubject = chapters.reduce((acc: Record<string, any[]>, chapter: any) => {
-    if (!chapter.subject_id) return acc;
-    if (!acc[chapter.subject_id]) acc[chapter.subject_id] = [];
-    acc[chapter.subject_id].push({
+  const chaptersBySubject = chapters.reduce((acc: Record<string, unknown[]>, chapter: Record<string, unknown>) => {
+    const subjectId = chapter.subject_id as string;
+    if (!subjectId) return acc;
+    if (!acc[subjectId]) acc[subjectId] = [];
+    acc[subjectId].push({
       ...chapter,
       type: 'chapter',
-      children: topicsByChapter[chapter.id] || [],
+      children: topicsByChapter[chapter.id as string] || [],
     });
     return acc;
   }, {});
 
-  return subjects.map((subject: any) => ({
+  return subjects.map((subject: Record<string, unknown>) => ({
     ...subject,
     type: 'subject',
-    children: chaptersBySubject[subject.id] || [],
-  }));
+    children: chaptersBySubject[subject.id as string] || [],
+  })) as unknown as CurriculumNode[];
 };
 
-const pickAllowedFields = (nodeType: NodeType, rawData: Record<string, any> = {}) => {
+const pickAllowedFields = <T>(nodeType: NodeType, rawData: Record<string, unknown> = {}): Partial<T> => {
   const allowedFieldsByType: Record<NodeType, string[]> = {
-    subject: [
-      'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'icon_url', 'curriculum_version', 'language',
-    ],
-    chapter: [
-      'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'subject_id',
-    ],
-    topic: [
-      'name_en', 'name_bn', 'slug', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'chapter_id', 'total_questions',
-    ],
+    subject: ['name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'icon_url', 'curriculum_version', 'language'],
+    chapter: ['name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'subject_id'],
+    topic: ['name_en', 'name_bn', 'slug', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'chapter_id', 'total_questions'],
   };
 
   const allowedFields = allowedFieldsByType[nodeType];
-  const cleaned: Record<string, any> = {};
+  const sanitized: Record<string, unknown> = {};
 
   for (const key of allowedFields) {
-    if (rawData[key] !== undefined) {
-      cleaned[key] = rawData[key];
+    const value = rawData[key];
+    if (value !== undefined) {
+      sanitized[key] = value;
     }
   }
 
-  return cleaned;
+  return sanitized as Partial<T>;
 };
 
 const generateNodeId = (nodeType: NodeType): string => {
@@ -111,79 +121,109 @@ const generateNodeId = (nodeType: NodeType): string => {
 };
 
 export const manageCurriculumNode = async (
-  action: 'insert' | 'update' | 'delete',
-  nodeType: NodeType,
-  data: any,
+  action: 'insert' | 'update' | 'delete', 
+  nodeType: NodeType, 
+  data: Record<string, unknown>, 
   id?: string
 ) => {
-  const table = nodeType === 'subject' ? 'subjects' : nodeType === 'chapter' ? 'chapters' : 'topics';
-
   if (action === 'delete') {
     if (!id) throw new Error('ID is required for delete action');
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) throw new Error(error.message);
+    if (nodeType === 'subject') await supabase.from('subjects').delete().eq('id', id);
+    else if (nodeType === 'chapter') await supabase.from('chapters').delete().eq('id', id);
+    else await supabase.from('topics').delete().eq('id', id);
     return true;
   }
 
-  const payload = pickAllowedFields(nodeType, data || {});
-
-  if (action === 'insert') {
-    payload.id = generateNodeId(nodeType);
-    const { data: result, error } = await supabase.from(table).insert([payload]).select().single();
-    if (error) throw new Error(error.message);
-    return result;
+  if (nodeType === 'subject') {
+    const payload = pickAllowedFields<TablesInsert<'subjects'>>('subject', data);
+    if (action === 'insert') {
+      payload.id = generateNodeId('subject');
+      const { data: result, error } = await supabase.from('subjects').insert(payload as TablesInsert<'subjects'>).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    } else {
+      if (!id || Object.keys(payload).length === 0) throw new Error('Valid ID and fields are required');
+      const { data: result, error } = await supabase.from('subjects').update(payload as TablesUpdate<'subjects'>).eq('id', id).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    }
   }
 
-  if (action === 'update') {
-    if (!id) throw new Error('ID is required for update action');
-    if (Object.keys(payload).length === 0) throw new Error('No valid fields provided for update');
-    const { data: result, error } = await supabase.from(table).update(payload).eq('id', id).select().single();
-    if (error) throw new Error(error.message);
-    return result;
+  if (nodeType === 'chapter') {
+    const payload = pickAllowedFields<TablesInsert<'chapters'>>('chapter', data);
+    if (action === 'insert') {
+      payload.id = generateNodeId('chapter');
+      const { data: result, error } = await supabase.from('chapters').insert(payload as TablesInsert<'chapters'>).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    } else {
+      if (!id || Object.keys(payload).length === 0) throw new Error('Valid ID and fields are required');
+      const { data: result, error } = await supabase.from('chapters').update(payload as TablesUpdate<'chapters'>).eq('id', id).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    }
+  }
+
+  if (nodeType === 'topic') {
+    const payload = pickAllowedFields<TablesInsert<'topics'>>('topic', data);
+    if (action === 'insert') {
+      payload.id = generateNodeId('topic');
+      const { data: result, error } = await supabase.from('topics').insert(payload as TablesInsert<'topics'>).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    } else {
+      if (!id || Object.keys(payload).length === 0) throw new Error('Valid ID and fields are required');
+      const { data: result, error } = await supabase.from('topics').update(payload as TablesUpdate<'topics'>).eq('id', id).select().single();
+      if (error) throw new Error(error.message);
+      return result;
+    }
   }
 
   throw new Error('Invalid curriculum action');
 };
 
 export const createComprehension = async (data: ComprehensionPayload) => {
-  const { data: result, error } = await supabase.from('comprehensions').insert([data]).select().single();
+  const { data: result, error } = await supabase.from('comprehensions').insert(data as TablesInsert<'comprehensions'>).select().single();
   if (error) throw new Error(error.message);
   return result;
 };
 
+// MISSING FUNCTION ADDED: searchComprehensions
 export const searchComprehensions = async (query: string) => {
   const { data, error } = await supabase
     .from('comprehensions')
-    .select('id, body, subject_id, chapter_id, topic_id')
+    .select('*')
     .ilike('body', `%${query}%`)
-    .limit(10);
+    .limit(20);
+
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const saveSmartQuestion = async (questionData: QuestionPayload) => {
-  // 100% Duplicate check based on exact JSON body match
-  const { data: existing } = await supabase
+  const content_hash = generateContentHash(questionData as unknown as Record<string, unknown>);
+  
+  const payloadToInsert: TablesInsert<'questions'> = {
+    ...(questionData as unknown as TablesInsert<'questions'>),
+    content_hash,
+    status: questionData.status || 'pending'
+  };
+
+  const { data, error } = await supabase
     .from('questions')
-    .select('id')
-    .eq('subject_id', questionData.subject_id)
-    .contains('body', questionData.body)
-    .limit(1);
+    .insert(payloadToInsert)
+    .select()
+    .single();
 
-  if (existing && existing.length > 0) {
-    throw new Error('100% Duplicate question found. Cannot save.');
+  if (error) {
+    if (error.code === '23505') throw new Error('Duplicate question found.');
+    throw new Error(error.message);
   }
-
-  // Set default status to pending if not provided
-  questionData.status = questionData.status || 'pending';
-
-  const { data, error } = await supabase.from('questions').insert([questionData]).select().single();
-  if (error) throw new Error(error.message);
   return data;
 };
 
 export const updateQuestion = async (id: string, questionData: Partial<QuestionPayload>) => {
-  const { data, error } = await supabase.from('questions').update(questionData).eq('id', id).select().single();
+  const { data, error } = await supabase.from('questions').update(questionData as TablesUpdate<'questions'>).eq('id', id).select().single();
   if (error) throw new Error(error.message);
   return data;
 };
@@ -224,60 +264,48 @@ export const refreshSearchIndex = async (type: 'vector' | 'global'): Promise<boo
   return true;
 };
 
-export const saveBulkQuestions = async (questionsData: any[], userId?: string) => {
+export const saveBulkQuestions = async (questionsData: Record<string, unknown>[], userId?: string) => {
   const BATCH_SIZE = 500;
-  let allInsertedData: any[] = [];
-  let flatQuestionsToInsert: any[] = [];
+  let allInsertedData: unknown[] = [];
+  let flatQuestionsToInsert: TablesInsert<'questions'>[] = [];
 
   for (const item of questionsData) {
     if (item.type === 'Comprehension') {
-      const comprehensionPayload = { body: typeof item.passage === 'object' ? JSON.stringify(item.passage) : item.passage };
-      const { data: compResult, error: compError } = await supabase.from('comprehensions').insert([comprehensionPayload]).select('id').single();
-      if (compError) throw new Error(`Comprehension insert failed: ${compError.message}`);
+      const passageBody = typeof item.passage === 'object' ? JSON.stringify(item.passage) : item.passage as string;
+      const comprehensionPayload: TablesInsert<'comprehensions'> = { body: passageBody };
+      
+      const { data: compResult, error: compError } = await supabase.from('comprehensions').insert(comprehensionPayload).select('id').single();
+      if (compError) throw new Error(compError.message);
 
-      if (item.questions && Array.isArray(item.questions)) {
+      if (Array.isArray(item.questions)) {
         for (const q of item.questions) {
-          // Check for exact duplicate
-          const { data: existing } = await supabase
-            .from('questions')
-            .select('id')
-            .eq('subject_id', q.subject_id || item.subject_id)
-            .contains('body', q.body)
-            .limit(1);
-
-          if (!existing || existing.length === 0) {
-            flatQuestionsToInsert.push({ 
-              ...q, 
-              subject_id: q.subject_id || item.subject_id,
-              comprehension_id: compResult.id, 
-              status: q.status || 'pending', 
-              created_by: userId 
-            });
-          }
+          flatQuestionsToInsert.push({ 
+            ...q, 
+            subject_id: q.subject_id || item.subject_id,
+            comprehension_id: compResult.id, 
+            status: q.status || 'pending', 
+            created_by: userId,
+            content_hash: generateContentHash(q as Record<string, unknown>)
+          } as TablesInsert<'questions'>);
         }
       }
     } else {
-      // Check for exact duplicate
-      const { data: existing } = await supabase
-        .from('questions')
-        .select('id')
-        .eq('subject_id', item.subject_id)
-        .contains('body', item.body)
-        .limit(1);
-
-      if (!existing || existing.length === 0) {
-        flatQuestionsToInsert.push({ 
-          ...item, 
-          status: item.status || 'pending', 
-          created_by: userId 
-        });
-      }
+      flatQuestionsToInsert.push({ 
+        ...item, 
+        status: item.status || 'pending', 
+        created_by: userId,
+        content_hash: generateContentHash(item as Record<string, unknown>)
+      } as TablesInsert<'questions'>);
     }
   }
 
   for (let i = 0; i < flatQuestionsToInsert.length; i += BATCH_SIZE) {
     const chunk = flatQuestionsToInsert.slice(i, i + BATCH_SIZE);
-    const { data, error } = await supabase.from('questions').insert(chunk).select();
+    const { data, error } = await supabase
+      .from('questions')
+      .upsert(chunk, { onConflict: 'subject_id, content_hash', ignoreDuplicates: true })
+      .select();
+      
     if (error) throw new Error(error.message);
     if (data) allInsertedData.push(...data);
   }
@@ -298,14 +326,17 @@ export const getAuditQuestions = async (filters: AuditFilterParams) => {
 };
 
 export const updateQuestionAuditStatus = async (id: string, status: string, notes: string | undefined, adminId: string) => {
-    const updateData: any = { status, updated_at: new Date().toISOString() };
-    if (status === 'approved') { updateData.approved_by = adminId; updateData.approved_at = new Date().toISOString(); }
+    const updateData: TablesUpdate<'questions'> = { status, updated_at: new Date().toISOString() };
+    if (status === 'approved') { 
+        updateData.approved_by = adminId; 
+        updateData.approved_at = new Date().toISOString(); 
+    }
     const { data, error } = await supabase.from('questions').update(updateData).eq('id', id).select().single();
     if (error) throw new Error(error.message);
     return data;
 };
 
-export const getFilteredQuestions = async (filters: any, page: number = 1, limit: number = 20) => {
+export const getFilteredQuestions = async (filters: QuestionBankFilters, page: number = 1, limit: number = 20) => {
   let query = supabase
     .from('questions')
     .select('id, body, options, explanation, difficulty_level, type, status, created_at, subject_id, chapter_id, tags, media_id', { count: 'exact' });
@@ -322,16 +353,11 @@ export const getFilteredQuestions = async (filters: any, page: number = 1, limit
   const from = (page - 1) * limit;
   const to = from + limit - 1;
 
-  const { data, count, error } = await query
-    .order('created_at', { ascending: false })
-    .range(from, to);
+  const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
 
   if (error) throw new Error(error.message);
 
-  return {
-    data,
-    total: count || 0
-  };
+  return { data, total: count || 0 };
 };
 
 export const hardDeleteQuestion = async (id: string) => {
