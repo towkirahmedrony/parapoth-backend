@@ -25,14 +25,15 @@ import notificationRoutes from './features/notifications/notifications.routes';
 import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; 
 import historyRoutes from './features/history/history.routes'; 
 
-// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট, রিপোর্ট এবং রেফারেল রাউট ইম্পোর্ট
+// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট, রিপোর্ট, রেফারেল এবং ইকোনমি রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
 import growthRoutes from './features/growth/streak.routes'; 
-import referralRoutes from './features/referral/referral.routes'; // 👈 রেফারেল রাউট ইম্পোর্ট করা হলো
+import referralRoutes from './features/referral/referral.routes'; 
 import { contactRoutes } from './features/contact/contact.routes';
 import reportRoutes from './features/reports/reports.routes'; 
+import economyRoutes from './features/economy/economy.routes'; // 👈 ইকোনমি রাউট ইম্পোর্ট করা হলো
 
 dotenv.config();
 
@@ -45,7 +46,7 @@ const envClientUrls = process.env.CLIENT_URL
 
 // CORS Allowed Origins সেটআপ
 const allowedOrigins = [
-  ...envClientUrls, // 👈 এখানে স্প্রেড অপারেটর (...) দিয়ে ভাঙা URL গুলো যুক্ত করা হলো
+  ...envClientUrls,
   'http://localhost:5173', 
   'http://localhost:5174',
   'http://127.0.0.1:5174',
@@ -91,7 +92,7 @@ app.use('/api/v1/leaderboard', leaderboardRoutes);
 app.use('/api/v1/exams/user', ExamUserRoutes);
 app.use('/api/v1/exams/admin', ExamAdminRoutes);
 
-// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট ও রিপোর্ট মডিউল রাউট
+// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট, রিপোর্ট ও ইকোনমি মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
 app.use('/api/v1/finance', financeRoutes); 
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
@@ -101,9 +102,10 @@ app.use('/api/v1/history', historyRoutes);
 app.use('/api/v1/progress', progressRoutes); 
 app.use('/api/v1/ai', aiRoutes); 
 app.use('/api/v1/growth', growthRoutes); 
-app.use('/api/v1/referral', referralRoutes); // 👈 রেফারেল মডিউল রেজিস্টার করা হলো
+app.use('/api/v1/referral', referralRoutes); 
 app.use('/api/v1/contact', contactRoutes);
 app.use('/api/v1/reports', reportRoutes); 
+app.use('/api/v1', economyRoutes); // 👈 ইকোনমি মডিউল রেজিস্টার করা হলো (marketplace & balance)
 
 // Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
@@ -138,4 +140,3 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 export default app;
-
