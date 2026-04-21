@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../../config/supabaseAdmin';
 
 export const economyService = {
+  // === ইউজার এন্ডপয়েন্ট ===
   getUserBalance: async (userId: string) => {
     const { data, error } = await supabaseAdmin
       .from('profiles')
@@ -13,7 +14,6 @@ export const economyService = {
   },
 
   getMarketplaceItems: async () => {
-    // Note: 'marketplace_items' is cast to 'any' because it's not yet in database.ts types
     const { data, error } = await supabaseAdmin
       .from('marketplace_items' as any)
       .select('*')
@@ -25,34 +25,25 @@ export const economyService = {
   },
 
   purchaseItem: async (userId: string, itemId: string) => {
-    // ১. আইটেমের তথ্য ফেচ করা
     const { data: item, error: itemError } = await supabaseAdmin
       .from('marketplace_items' as any)
       .select('*')
       .eq('id', itemId)
       .single();
 
-    if (itemError || !item) {
-      throw new Error('Item not found or inactive');
-    }
+    if (itemError || !item) throw new Error('Item not found or inactive');
 
-    // ২. ইউজারের বর্তমান ব্যালেন্স চেক করা
     const { data: profile, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('coin_balance')
       .eq('id', userId)
       .single();
 
-    if (profileError || !profile) {
-      throw new Error('User profile not found');
-    }
+    if (profileError || !profile) throw new Error('User profile not found');
 
     const currentBalance = profile.coin_balance || 0;
-    if (currentBalance < item.price_coins) {
-      throw new Error('Insufficient coin balance');
-    }
+    if (currentBalance < item.price_coins) throw new Error('Insufficient coin balance');
 
-    // ৩. ব্যালেন্স কাটা
     const newBalance = currentBalance - item.price_coins;
     const { error: updateError } = await supabaseAdmin
       .from('profiles')
@@ -61,29 +52,63 @@ export const economyService = {
 
     if (updateError) throw new Error('Failed to deduct coins');
 
-    // ৪. ট্রানজেকশন রেকর্ড রাখা
     const { error: txError } = await supabaseAdmin
       .from('coin_transactions')
       .insert({
         user_id: userId,
-        amount: -item.price_coins, // খরচ তাই মাইনাস
+        amount: -item.price_coins,
         transaction_type: 'purchase',
         description: `Purchased marketplace item: ${item.title}`,
         reference_id: item.id
       });
 
-    if (txError) {
-      console.error('Transaction log failed:', txError.message);
-      // ব্যালেন্স কাটা হয়ে গেলে ট্রানজেকশন ফেইল করলেও ইউজারকে এরর দেখানো ঠিক হবে না, তাই শুধু লগ করলাম
-    }
+    if (txError) console.error('Transaction log failed:', txError.message);
 
-    // ৫. (ঐচ্ছিক) এখানে ইউজারের একাউন্টে প্রিমিয়াম ফিচার আনলক করার লজিক যোগ করতে পারেন
-    // যেমন: item.item_type === 'premium_feature' হলে profiles.subscription_status আপডেট করা
+    return { success: true, message: `Successfully purchased ${item.title}`, new_balance: newBalance };
+  },
 
-    return { 
-      success: true, 
-      message: `Successfully purchased ${item.title}`, 
-      new_balance: newBalance 
-    };
+  // === এডমিন এন্ডপয়েন্ট (CRUD) ===
+  getAdminMarketplaceItems: async () => {
+    // এডমিন প্যানেলের জন্য ইনঅ্যাক্টিভ আইটেমসহ সব আনা হবে
+    const { data, error } = await supabaseAdmin
+      .from('marketplace_items' as any)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  createMarketplaceItem: async (itemData: any) => {
+    const { data, error } = await supabaseAdmin
+      .from('marketplace_items' as any)
+      .insert([itemData])
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  updateMarketplaceItem: async (id: string, updateData: any) => {
+    const { data, error } = await supabaseAdmin
+      .from('marketplace_items' as any)
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  deleteMarketplaceItem: async (id: string) => {
+    const { error } = await supabaseAdmin
+      .from('marketplace_items' as any)
+      .delete()
+      .eq('id', id);
+
+    if (error) throw new Error(error.message);
+    return { success: true, message: 'Item deleted successfully' };
   }
 };
