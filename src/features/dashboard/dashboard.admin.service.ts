@@ -1,34 +1,84 @@
 import { supabase } from '../../config/supabase';
 
-/**
- * Utility function to handle Supabase errors consistently
- */
-const handleSupabaseError = (error: any, context: string) => {
+interface SupabaseErrorLike {
+  message?: string;
+}
+
+interface PaymentRequestRow {
+  id: string;
+  amount: number | null;
+  method: string | null;
+  trx_id: string | null;
+  created_at: string;
+  user_id: string;
+  profiles?: {
+    full_name?: string | null;
+  } | null;
+}
+
+interface UserReportRow {
+  id: string;
+  type: string;
+  report_reason: string | null;
+  created_at: string;
+  status: string;
+  profiles?: {
+    full_name?: string | null;
+  } | null;
+}
+
+interface ExamPaperRow {
+  id: string;
+  title: string;
+}
+
+interface AdminPerformanceRow {
+  month: string;
+  questions_approved: number | null;
+  support_tickets_resolved: number | null;
+  users_banned: number | null;
+}
+
+interface SecurityAlertRow {
+  id: string;
+  type: string;
+  message: string;
+  priority: string;
+  created_at: string;
+  is_read: boolean;
+  action_link: string | null;
+}
+
+const assertNoSupabaseError = (
+  error: SupabaseErrorLike | null,
+  context: string
+): void => {
   if (error) {
-    console.error(`❌ [Supabase Error in ${context}]:`, error.message || error);
-    throw new Error(`${context}: ${error.message || JSON.stringify(error)}`);
+    throw new Error(`${context}: ${error.message ?? 'Unknown Supabase error'}`);
   }
 };
 
-/**
- * Calculates percentage trend between today and yesterday
- */
 const calculateTrend = (todayValue: number, yesterdayValue: number): number => {
-  if (yesterdayValue === 0) return todayValue > 0 ? 100 : 0;
+  if (yesterdayValue === 0) {
+    return todayValue > 0 ? 100 : 0;
+  }
+
   const difference = todayValue - yesterdayValue;
   return Number(((difference / yesterdayValue) * 100).toFixed(1));
 };
 
 export const getLiveMetrics = async () => {
   const now = new Date();
-  
-  // Today boundaries
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfTodayIso = startOfToday.toISOString();
 
-  // Yesterday boundaries
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
   const startOfYesterday = new Date(startOfToday);
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  const startOfTodayIso = startOfToday.toISOString();
   const startOfYesterdayIso = startOfYesterday.toISOString();
 
   const [
@@ -36,38 +86,72 @@ export const getLiveMetrics = async () => {
     todayRegistrationsRes,
     yesterdayRegistrationsRes,
     todayRevenueRes,
-    yesterdayRevenueRes
+    yesterdayRevenueRes,
   ] = await Promise.all([
-    // Active profiles count
-    supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('account_status', 'active'),
-    
-    // Registrations
-    supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', startOfTodayIso),
-    supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', startOfYesterdayIso).lt('created_at', startOfTodayIso),
-    
-    // Revenue based on approved payment requests
-    supabase.from('payment_requests').select('amount').eq('status', 'approved').gte('updated_at', startOfTodayIso),
-    supabase.from('payment_requests').select('amount').eq('status', 'approved').gte('updated_at', startOfYesterdayIso).lt('updated_at', startOfTodayIso)
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('account_status', 'active'),
+
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', startOfTodayIso),
+
+    supabase
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', startOfYesterdayIso)
+      .lt('created_at', startOfTodayIso),
+
+    supabase
+      .from('payment_requests')
+      .select('amount')
+      .eq('status', 'approved')
+      .gte('updated_at', startOfTodayIso),
+
+    supabase
+      .from('payment_requests')
+      .select('amount')
+      .eq('status', 'approved')
+      .gte('updated_at', startOfYesterdayIso)
+      .lt('updated_at', startOfTodayIso),
   ]);
 
-  handleSupabaseError(activeUsersRes.error, 'getLiveMetrics (activeUsers)');
-  handleSupabaseError(todayRegistrationsRes.error, 'getLiveMetrics (todayRegistrations)');
-  handleSupabaseError(yesterdayRegistrationsRes.error, 'getLiveMetrics (yesterdayRegistrations)');
-  handleSupabaseError(todayRevenueRes.error, 'getLiveMetrics (todayRevenue)');
-  handleSupabaseError(yesterdayRevenueRes.error, 'getLiveMetrics (yesterdayRevenue)');
+  assertNoSupabaseError(activeUsersRes.error, 'getLiveMetrics(activeUsers)');
+  assertNoSupabaseError(
+    todayRegistrationsRes.error,
+    'getLiveMetrics(todayRegistrations)'
+  );
+  assertNoSupabaseError(
+    yesterdayRegistrationsRes.error,
+    'getLiveMetrics(yesterdayRegistrations)'
+  );
+  assertNoSupabaseError(todayRevenueRes.error, 'getLiveMetrics(todayRevenue)');
+  assertNoSupabaseError(
+    yesterdayRevenueRes.error,
+    'getLiveMetrics(yesterdayRevenue)'
+  );
 
-  const todayRegistrationsCount = todayRegistrationsRes.count || 0;
-  const yesterdayRegistrationsCount = yesterdayRegistrationsRes.count || 0;
+  const todayRegistrationsCount = todayRegistrationsRes.count ?? 0;
+  const yesterdayRegistrationsCount = yesterdayRegistrationsRes.count ?? 0;
 
-  const todayRevenue = todayRevenueRes.data?.reduce((sum, req) => sum + (req.amount || 0), 0) || 0;
-  const yesterdayRevenue = yesterdayRevenueRes.data?.reduce((sum, req) => sum + (req.amount || 0), 0) || 0;
+  const todayRevenue =
+    todayRevenueRes.data?.reduce((sum, row) => sum + (row.amount ?? 0), 0) ?? 0;
+
+  const yesterdayRevenue =
+    yesterdayRevenueRes.data?.reduce((sum, row) => sum + (row.amount ?? 0), 0) ??
+    0;
 
   return {
-    activeUsers: activeUsersRes.count || 0,
+    activeUsers: activeUsersRes.count ?? 0,
     todayRegistrations: todayRegistrationsCount,
     todayRevenue,
-    usersTrend: 0, // Need historical daily active users table to calculate this accurately
-    registrationsTrend: calculateTrend(todayRegistrationsCount, yesterdayRegistrationsCount),
+    usersTrend: 0,
+    registrationsTrend: calculateTrend(
+      todayRegistrationsCount,
+      yesterdayRegistrationsCount
+    ),
     revenueTrend: calculateTrend(todayRevenue, yesterdayRevenue),
   };
 };
@@ -75,8 +159,7 @@ export const getLiveMetrics = async () => {
 export const getActiveExams = async () => {
   const nowIso = new Date().toISOString();
 
-  // Fetch exams that are published and currently within their start/end time
-  const { data: exams, error: examsError } = await supabase
+  const { data: exams, error } = await supabase
     .from('exam_papers')
     .select('id, title')
     .eq('is_published', true)
@@ -85,32 +168,32 @@ export const getActiveExams = async () => {
     .order('start_time', { ascending: false })
     .limit(5);
 
-  handleSupabaseError(examsError, 'getActiveExams (exams fetch)');
+  assertNoSupabaseError(error, 'getActiveExams(fetchExams)');
 
-  if (!exams || exams.length === 0) return [];
+  const safeExams: ExamPaperRow[] = exams ?? [];
+  if (safeExams.length === 0) return [];
 
-  // For each active exam, count active participants from exam_progress
-  // Assuming exam_progress rows exist for users currently taking the exam
-  const examsWithParticipants = await Promise.all(
-    exams.map(async (exam) => {
+  const results = await Promise.all(
+    safeExams.map(async exam => {
       const { count, error: countError } = await supabase
         .from('exam_progress')
-        .select('*', { count: 'exact', head: true })
-        .eq('exam_id', exam.id)
-        // Optionally filter by last_updated_at to ensure they are recently active
-        // .gte('last_updated_at', new Date(Date.now() - 15 * 60000).toISOString()); 
+        .select('id', { count: 'exact', head: true })
+        .eq('exam_id', exam.id);
 
-      if (countError) console.error(`Error fetching participants for exam ${exam.id}:`, countError.message);
+      assertNoSupabaseError(
+        countError,
+        `getActiveExams(countParticipants:${exam.id})`
+      );
 
       return {
         exam_id: exam.id,
         title: exam.title,
-        active_participants: count || 0
+        active_participants: count ?? 0,
       };
     })
   );
 
-  return examsWithParticipants;
+  return results;
 };
 
 export const getSecurityAlerts = async () => {
@@ -121,8 +204,9 @@ export const getSecurityAlerts = async () => {
     .order('created_at', { ascending: false })
     .limit(10);
 
-  handleSupabaseError(error, 'getSecurityAlerts');
-  return data || [];
+  assertNoSupabaseError(error, 'getSecurityAlerts');
+
+  return (data ?? []) as SecurityAlertRow[];
 };
 
 export const getAdminPerformance = async (adminId: string) => {
@@ -130,65 +214,75 @@ export const getAdminPerformance = async (adminId: string) => {
     .from('admin_performance_stats')
     .select('month, questions_approved, support_tickets_resolved, users_banned')
     .eq('admin_id', adminId)
-    .order('month', { ascending: true }) // Assuming 'month' is sortable (e.g., YYYY-MM)
+    .order('month', { ascending: true })
     .limit(6);
 
-  handleSupabaseError(error, 'getAdminPerformance');
-  return data || [];
+  assertNoSupabaseError(error, 'getAdminPerformance');
+
+  return ((data ?? []) as AdminPerformanceRow[]).map(row => ({
+    month: row.month,
+    questions_approved: row.questions_approved ?? 0,
+    support_tickets_resolved: row.support_tickets_resolved ?? 0,
+    users_banned: row.users_banned ?? 0,
+  }));
 };
 
 export const getPendingPayments = async () => {
   const { data, error } = await supabase
     .from('payment_requests')
-    .select(`
-      id, 
-      amount, 
-      method, 
-      trx_id, 
-      created_at, 
-      user_id, 
+    .select(
+      `
+      id,
+      amount,
+      method,
+      trx_id,
+      created_at,
+      user_id,
       profiles:user_id(full_name)
-    `)
+    `
+    )
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
-    .limit(10); // Added limit for performance on dashboard
+    .limit(10);
 
-  handleSupabaseError(error, 'getPendingPayments');
+  assertNoSupabaseError(error, 'getPendingPayments');
 
-  return (data || []).map((payment: any) => ({
+  return ((data ?? []) as PaymentRequestRow[]).map(payment => ({
     id: payment.id,
     user_id: payment.user_id,
-    user_name: payment.profiles?.full_name || 'Unknown User',
-    amount: payment.amount,
-    method: payment.method || 'Unknown',
-    trx_id: payment.trx_id || 'N/A',
-    created_at: payment.created_at
+    user_name: payment.profiles?.full_name ?? 'Unknown User',
+    amount: payment.amount ?? 0,
+    method: payment.method ?? 'Unknown',
+    trx_id: payment.trx_id ?? 'N/A',
+    created_at: payment.created_at,
   }));
 };
 
 export const getModerationQueue = async () => {
   const { data, error } = await supabase
     .from('user_reports')
-    .select(`
-      id, 
-      type, 
-      report_reason, 
-      created_at, 
-      status, 
+    .select(
+      `
+      id,
+      type,
+      report_reason,
+      created_at,
+      status,
       profiles:reporter_user_id(full_name)
-    `)
+    `
+    )
     .eq('status', 'pending')
     .order('created_at', { ascending: false })
-    .limit(10); // Added limit for performance on dashboard
+    .limit(10);
 
-  handleSupabaseError(error, 'getModerationQueue');
+  assertNoSupabaseError(error, 'getModerationQueue');
 
-  return (data || []).map((report: any) => ({
+  return ((data ?? []) as UserReportRow[]).map(report => ({
     id: report.id,
     type: report.type,
-    report_reason: report.report_reason || 'No reason provided',
-    reporter_name: report.profiles?.full_name || 'Anonymous',
+    report_reason: report.report_reason ?? 'No reason provided',
+    reporter_name: report.profiles?.full_name ?? 'Anonymous',
     created_at: report.created_at,
-    status: report.status
+    status: report.status,
   }));
 };
