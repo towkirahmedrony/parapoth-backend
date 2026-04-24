@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { supabase } from '../../config/supabase';
+import { supabaseAdmin as supabase } from '../../config/supabaseAdmin';
 import {
   createHttpError,
   createSessionTitle,
