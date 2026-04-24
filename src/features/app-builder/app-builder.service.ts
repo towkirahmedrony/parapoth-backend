@@ -92,3 +92,43 @@ export const updateLevels = async (levels: any[]) => {
   if (error) throw error;
   return data;
 };
+
+// --- Banner Management ---
+export const getBanners = async () => {
+  const { data, error } = await supabase
+    .from('home_banners')
+    .select('*')
+    .order('sequence', { ascending: true });
+  if (error) throw error;
+  return data;
+};
+
+export const createBanner = async (bannerPayload: any) => {
+  const { data, error } = await supabaseAdmin
+    .from('home_banners')
+    .insert([bannerPayload])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateBanner = async (id: string, updates: any) => {
+  const { data, error } = await supabaseAdmin
+    .from('home_banners')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const deleteBanner = async (id: string) => {
+  const { error } = await supabaseAdmin
+    .from('home_banners')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+  return true;
+};

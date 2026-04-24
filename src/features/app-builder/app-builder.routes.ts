@@ -10,6 +10,7 @@ router.get('/home-grids', AppBuilderController.getHomeGrids);
 router.get('/theme-config', AppBuilderController.getThemeConfig);
 router.get('/configs', AppBuilderController.getAppConfigs);
 router.get('/configs/:key', AppBuilderController.getAppConfigs);
+router.get('/banners', AppBuilderController.getBanners); // <-- ব্যানারের পাবলিক রাউট
 
 // Admin guarded routes
 const adminGuard = [requireAuth, rbacGuard(['admin', 'super_admin'])];
@@ -27,5 +28,10 @@ router.get('/levels', adminGuard, AppBuilderController.getLevels);
 router.put('/levels', adminGuard, AppBuilderController.updateLevels);
 
 router.put('/global-notice', adminGuard, AppBuilderController.updateGlobalNotice);
+
+// --- Admin Banner Routes ---
+router.post('/banners', adminGuard, AppBuilderController.createBanner);
+router.put('/banners/:id', adminGuard, AppBuilderController.updateBanner);
+router.delete('/banners/:id', adminGuard, AppBuilderController.deleteBanner);
 
 export default router;

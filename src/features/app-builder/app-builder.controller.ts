@@ -94,3 +94,27 @@ export const updateLevels = catchAsync(async (req: Request, res: Response) => {
   await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'levels_master', 'bulk_update', levels);
   sendResponse(res, { statusCode: 200, success: true, message: 'Levels updated successfully', data });
 });
+
+// --- Banner Controllers ---
+export const getBanners = catchAsync(async (req: Request, res: Response) => {
+  const banners = await AppBuilderService.getBanners();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Banners fetched successfully', data: banners });
+});
+
+export const createBanner = catchAsync(async (req: Request, res: Response) => {
+  const banner = await AppBuilderService.createBanner(req.body);
+  await SystemService.createAuditLog(req.user!.id, 'INSERT', 'home_banners', banner.id, req.body);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Banner created successfully', data: banner });
+});
+
+export const updateBanner = catchAsync(async (req: Request, res: Response) => {
+  const banner = await AppBuilderService.updateBanner(req.params.id, req.body);
+  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'home_banners', req.params.id, req.body);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Banner updated successfully', data: banner });
+});
+
+export const deleteBanner = catchAsync(async (req: Request, res: Response) => {
+  await AppBuilderService.deleteBanner(req.params.id);
+  await SystemService.createAuditLog(req.user!.id, 'DELETE', 'home_banners', req.params.id, null);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Banner deleted successfully', data: null });
+});
