@@ -36,90 +36,6 @@ export const requestAdminOTP = catchAsync(async (req: Request, res: Response) =>
   sendResponse(res, { statusCode: 200, success: true, message: `OTP sent successfully to ${adminEmail}` });
 });
 
-// Home Grids
-export const getHomeGrids = catchAsync(async (req: Request, res: Response) => {
-  const grids = await SystemService.getActiveHomeGrids();
-  sendResponse(res, { statusCode: 200, success: true, message: 'Home grids fetched successfully', data: grids });
-});
-
-export const upsertHomeGrid = catchAsync(async (req: Request, res: Response) => {
-  const grid = await SystemService.upsertHomeGrid(req.body);
-  await SystemService.createAuditLog(req.user!.id, 'UPSERT', 'home_grids', grid.id, req.body);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Grid updated successfully', data: grid });
-});
-
-export const deleteHomeGrid = catchAsync(async (req: Request, res: Response) => {
-  await SystemService.deleteHomeGrid(req.params.id);
-  await SystemService.createAuditLog(req.user!.id, 'DELETE', 'home_grids', req.params.id, null);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Grid deleted successfully', data: null });
-});
-
-export const reorderHomeGrids = catchAsync(async (req: Request, res: Response) => {
-  await SystemService.reorderHomeGrids(req.body.grids);
-  await SystemService.createAuditLog(req.user!.id, 'REORDER', 'home_grids', 'bulk_reorder', req.body.grids);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Grids reordered', data: null });
-});
-
-// App Configs & Theme
-export const getAppConfigs = catchAsync(async (req: Request, res: Response) => {
-  const { key } = req.params;
-  
-  if (key) {
-    const config = await SystemService.getAppConfigByKey(key);
-    if (!config) return sendResponse(res, { statusCode: 404, success: false, message: 'Config not found' });
-    return sendResponse(res, { statusCode: 200, success: true, message: 'Config fetched', data: config });
-  }
-
-  const configs = await SystemService.getGlobalConfigs();
-  sendResponse(res, { statusCode: 200, success: true, message: 'Configs fetched', data: configs });
-});
-
-export const updateAppConfig = catchAsync(async (req: Request, res: Response) => {
-  const key = req.params.key || req.body.key;
-  const valuePayload = req.body.value ? { value: req.body.value } : req.body;
-  
-  if (!key) return sendResponse(res, { statusCode: 400, success: false, message: 'Config key is required' });
-
-  const config = await SystemService.upsertAppConfig(key, valuePayload);
-  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'app_configs', key, valuePayload);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Config updated', data: config });
-});
-
-export const updateXPRules = catchAsync(async (req: Request, res: Response) => {
-  const rules = req.body;
-  const data = await SystemService.updateXPRules(rules);
-  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'app_configs', 'xp_rules', rules);
-  sendResponse(res, { statusCode: 200, success: true, message: 'XP rules updated successfully', data });
-});
-
-export const getThemeConfig = catchAsync(async (req: Request, res: Response) => {
-  let theme = await SystemService.getGlobalThemeConfig();
-  if (theme && theme.schedules && Array.isArray(theme.schedules)) {
-    const now = new Date();
-    const activeSchedules = theme.schedules.filter((s: any) => {
-      if (!s.startDate || !s.endDate) return false;
-      return now >= new Date(s.startDate) && now <= new Date(s.endDate);
-    });
-
-    if (activeSchedules.length > 0) {
-      const activeSchedule = activeSchedules[0];
-      if (activeSchedule.themeData) {
-        theme.active_theme = activeSchedule.presetId;
-        theme.colors = { ...theme.colors, ...activeSchedule.themeData.colors };
-        theme.bgType = activeSchedule.themeData.bgType || 'color';
-        theme.bgMediaUrl = activeSchedule.themeData.bgMediaUrl || '';
-        theme.is_scheduled_override = true;
-      }
-    }
-  }
-  sendResponse(res, { statusCode: 200, success: true, message: 'Theme configuration fetched successfully', data: theme });
-});
-
-export const updateGlobalNotice = catchAsync(async (req: Request, res: Response) => {
-  const notice = await SystemService.updateGlobalNotice(req.body);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Global notice updated successfully', data: notice });
-});
-
 export const getEmergencyFlags = catchAsync(async (req: Request, res: Response) => {
   const flags = await SystemService.getEmergencyFlags();
   sendResponse(res, { statusCode: 200, success: true, message: 'Flags fetched', data: flags });
@@ -138,6 +54,7 @@ export const toggleEmergencyFlag = catchAsync(async (req: Request, res: Response
   let isAuthorized = false;
   const adminTotpSecret = process.env.ADMIN_TOTP_SECRET || "JBSWY3DPEHPK3PXP"; 
   const isTotpValid = speakeasy.totp.verify({ secret: adminTotpSecret, encoding: 'base32', token: authCode, window: 1 });
+  
   if (isTotpValid) {
     isAuthorized = true;
   } else {
@@ -182,16 +99,4 @@ export const resolveAdminAlert = catchAsync(async (req: Request, res: Response) 
   const alert = await SystemService.resolveAdminAlert(req.params.id, adminId);
   await SystemService.createAuditLog(adminId, 'RESOLVE', 'admin_alerts', req.params.id, { status: 'resolved' });
   sendResponse(res, { statusCode: 200, success: true, message: 'Alert resolved', data: alert });
-});
-
-export const getLevels = catchAsync(async (req: Request, res: Response) => {
-  const levels = await SystemService.getLevels();
-  sendResponse(res, { statusCode: 200, success: true, message: 'Levels fetched successfully', data: levels });
-});
-
-export const updateLevels = catchAsync(async (req: Request, res: Response) => {
-  const { levels } = req.body;
-  const data = await SystemService.updateLevels(levels);
-  await SystemService.createAuditLog(req.user!.id, 'UPDATE', 'levels_master', 'bulk_update', levels);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Levels updated successfully', data });
 });

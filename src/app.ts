@@ -25,7 +25,7 @@ import notificationRoutes from './features/notifications/notifications.routes';
 import notificationsAdminRoutes from './features/notifications/notifications.admin.routes'; 
 import historyRoutes from './features/history/history.routes'; 
 
-// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট, রিপোর্ট, রেফারেল এবং ইকোনমি রাউট ইম্পোর্ট
+// মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট, রিপোর্ট, রেফারেল, ইকোনমি এবং অ্যাপ বিল্ডার রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
@@ -33,7 +33,8 @@ import growthRoutes from './features/growth/streak.routes';
 import referralRoutes from './features/referral/referral.routes'; 
 import { contactRoutes } from './features/contact/contact.routes';
 import reportRoutes from './features/reports/reports.routes'; 
-import economyRoutes from './features/economy/economy.routes'; // 👈 ইকোনমি রাউট ইম্পোর্ট করা হলো
+import economyRoutes from './features/economy/economy.routes';
+import appBuilderRoutes from './features/app-builder/app-builder.routes'; // 👈 নতুন অ্যাপ বিল্ডার রাউট
 
 dotenv.config();
 
@@ -92,8 +93,9 @@ app.use('/api/v1/leaderboard', leaderboardRoutes);
 app.use('/api/v1/exams/user', ExamUserRoutes);
 app.use('/api/v1/exams/admin', ExamAdminRoutes);
 
-// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট, রিপোর্ট ও ইকোনমি মডিউল রাউট
+// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট, রিপোর্ট, ইকোনমি ও অ্যাপ বিল্ডার মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
+app.use('/api/v1/app-builder', appBuilderRoutes); // 👈 অ্যাপ বিল্ডার মডিউল রেজিস্টার করা হলো
 app.use('/api/v1/finance', financeRoutes); 
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
 app.use('/api/v1/notifications', notificationRoutes); 
@@ -105,7 +107,7 @@ app.use('/api/v1/growth', growthRoutes);
 app.use('/api/v1/referral', referralRoutes); 
 app.use('/api/v1/contact', contactRoutes);
 app.use('/api/v1/reports', reportRoutes); 
-app.use('/api/v1', economyRoutes); // 👈 ইকোনমি মডিউল রেজিস্টার করা হলো (marketplace & balance)
+app.use('/api/v1', economyRoutes);
 
 // Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
