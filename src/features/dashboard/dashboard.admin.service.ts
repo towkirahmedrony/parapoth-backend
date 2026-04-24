@@ -49,6 +49,13 @@ interface SecurityAlertRow {
   action_link: string | null;
 }
 
+interface ActiveBannerRow {
+  id: string;
+  title: string | null;
+  action_link: string | null;
+  sequence: number | null;
+}
+
 const assertNoSupabaseError = (
   error: SupabaseErrorLike | null,
   context: string
@@ -285,4 +292,18 @@ export const getModerationQueue = async () => {
     created_at: report.created_at,
     status: report.status,
   }));
+};
+
+// NEW FUNCTION: Get Active Banners for Dashboard Snapshot
+export const getActiveBanners = async () => {
+  const { data, error } = await supabase
+    .from('home_banners')
+    .select('id, title, action_link, sequence')
+    .eq('is_active', true)
+    .order('sequence', { ascending: true })
+    .limit(5);
+
+  assertNoSupabaseError(error, 'getActiveBanners');
+
+  return (data ?? []) as ActiveBannerRow[];
 };

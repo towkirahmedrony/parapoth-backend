@@ -26,6 +26,7 @@ export const getDashboardStats = catchAsync(
       adminPerformance,
       pendingPayments,
       moderationQueue,
+      activeBanners, // New Data Added
     ] = await Promise.all([
       dashboardService.getLiveMetrics(),
       dashboardService.getActiveExams(),
@@ -33,6 +34,7 @@ export const getDashboardStats = catchAsync(
       dashboardService.getAdminPerformance(adminId),
       dashboardService.getPendingPayments(),
       dashboardService.getModerationQueue(),
+      dashboardService.getActiveBanners(), // Call new service
     ]);
 
     return res.status(200).json({
@@ -44,6 +46,7 @@ export const getDashboardStats = catchAsync(
         adminPerformance,
         pendingPayments,
         moderationQueue,
+        activeBanners, // Return in response
       },
     });
   }
