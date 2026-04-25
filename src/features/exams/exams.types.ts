@@ -5,9 +5,11 @@ export interface GenerateExamDTO {
 
 export interface SubmitExamDTO {
   exam_id: string;
-  user_id: string;
   answers: Record<string, string>;
   time_taken: number;
+  ip_address?: string;
+  user_agent?: string | null;
+  device_id?: string | null;
 }
 
 export interface SubmitHistoryDTO {
@@ -19,6 +21,9 @@ export interface SubmitHistoryDTO {
   score: number;
   total_marks: number;
   details_json: any;
+  ip_address?: string;
+  user_agent?: string | null;
+  device_id?: string | null;
 }
 
 export interface AutoFetchDTO {

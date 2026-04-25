@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { authService } from './auth.service';
+import { extractIp } from '../../lib/utils/getIp'; // 👈 আইপি ইউটিলিটি ইম্পোর্ট করা হলো
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
@@ -13,7 +14,13 @@ export const authController = {
       if (!userId) return res.status(401).json({ error: 'Unauthorized user' });
 
       const profile = await authService.getProfile(userId);
+      
+      // 👈 আইপি এবং ডিভাইস ট্র্যাক করা হচ্ছে
+      const ipAddress = extractIp(req);
+      const deviceId = (req.headers['x-device-id'] as string) || req.cookies?.['trusted_admin_device'] || null;
+      
       authService.updateLastActive(userId).catch(console.error);
+      authService.logUserDevice(userId, deviceId, ipAddress).catch(console.error);
 
       return res.status(200).json(profile);
     } catch (error: any) {
@@ -36,7 +43,6 @@ export const authController = {
   },
 
   async setup2FA(req: Request, res: Response) {
-    // ... (আপনার আগের setup2FA কোড যা ছিল তাই থাকবে)
     try {
       const userId = (req as any).user?.id;
       const email = (req as any).user?.email || 'admin@parapoth.com';
@@ -60,8 +66,6 @@ export const authController = {
 
   async adminLoginInit(req: Request, res: Response) {
     try {
-      // 👈 এখানে আসল প্রোডাকশনে ডাটাবেজ থেকে ইউজারের 2FA স্ট্যাটাস চেক করতে হবে
-      // আপাতত আপনার mock প্রোফাইল দিয়ে রাখা হলো
       const mockAdminProfile = { id: 'some-uuid', is_2fa_enabled: true }; 
       const trustedDeviceToken = req.cookies?.['trusted_admin_device'];
 
@@ -83,7 +87,6 @@ export const authController = {
 
   async verify2FA(req: Request, res: Response) {
     try {
-      // 👈 requireAuth মিডলওয়্যার থেকে ভেরিফাইড userId পেয়ে যাচ্ছি!
       const userId = (req as any).user?.id; 
       const { token, trustDevice } = req.body;
 

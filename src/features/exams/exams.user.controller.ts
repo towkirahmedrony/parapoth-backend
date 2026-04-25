@@ -3,6 +3,7 @@ import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import { ExamUserService } from './exams.user.service';
 import { incrementStreakOnExamSubmit } from '../growth/streak.service';
+import { extractIp } from '../../lib/utils/getIp';
 
 export const generateExam = catchAsync(async (req: Request, res: Response) => {
   const result = await ExamUserService.generateExam(req.body);
@@ -11,7 +12,6 @@ export const generateExam = catchAsync(async (req: Request, res: Response) => {
 
 export const getArena = catchAsync(async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
-  // 🌟 আপডেট: query থেকে subjectSlug রিসিভ করা হলো
   const subjectSlug = req.query.subjectSlug as string | undefined; 
   
   const result = await ExamUserService.getArenaQuestions(limit, subjectSlug);
@@ -19,30 +19,42 @@ export const getArena = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const submitHistory = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id || req.body.user_id;
-  const result = await ExamUserService.submitHistory(userId, req.body);
+  // 👈 Strict User ID চেক (req.body.user_id বাদ দেওয়া হলো)
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized user' });
+
+  const ipAddress = extractIp(req);
+  const userAgent = req.headers['user-agent'] || null;
+  const deviceId = (req.headers['x-device-id'] as string) || null;
+
+  const payload = { ...req.body, ip_address: ipAddress, user_agent: userAgent, device_id: deviceId };
+  const result = await ExamUserService.submitHistory(userId, payload);
   
-  if (userId) {
-    await incrementStreakOnExamSubmit(userId);
-  }
+  await incrementStreakOnExamSubmit(userId);
 
   sendResponse(res, { statusCode: 200, success: true, message: 'Exam history saved', data: result });
 });
 
 export const submitExam = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id || req.body.user_id;
-  const payload = { ...req.body, user_id: userId };
-  const result = await ExamUserService.submitExamResult(payload);
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized user' });
 
-  if (userId) {
-    await incrementStreakOnExamSubmit(userId);
-  }
+  const ipAddress = extractIp(req);
+  const userAgent = req.headers['user-agent'] || null;
+  const deviceId = (req.headers['x-device-id'] as string) || null;
+
+  const payload = { ...req.body, ip_address: ipAddress, user_agent: userAgent, device_id: deviceId };
+  const result = await ExamUserService.submitExamResult(userId, payload);
+
+  await incrementStreakOnExamSubmit(userId);
 
   sendResponse(res, { statusCode: 200, success: true, message: 'Exam submitted', data: result });
 });
 
 export const createGroupBattle = catchAsync(async (req: Request, res: Response) => {
-  const challengerId = (req as any).user?.id || req.body.user_id; 
+  const challengerId = (req as any).user?.id; 
+  if (!challengerId) return res.status(401).json({ success: false, message: 'Unauthorized user' });
+
   const { opponentId, ...examData } = req.body;
 
   if (!opponentId) {
@@ -51,17 +63,12 @@ export const createGroupBattle = catchAsync(async (req: Request, res: Response) 
 
   const result = await ExamUserService.createGroupBattleExam(challengerId, opponentId, examData);
 
-  sendResponse(res, { 
-    statusCode: 201, 
-    success: true, 
-    message: 'ব্যাটল এক্সাম সফলভাবে তৈরি হয়েছে', 
-    data: result 
-  });
+  sendResponse(res, { statusCode: 201, success: true, message: 'ব্যাটল এক্সাম সফলভাবে তৈরি হয়েছে', data: result });
 });
 
-// 🌟 নতুন কন্ট্রোলার: বুকমার্ক টগল করার জন্য
 export const toggleBookmark = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id || req.body.user_id;
+  const userId = (req as any).user?.id;
+  if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized user' });
   const { questionId } = req.body;
 
   if (!questionId) {
@@ -70,10 +77,5 @@ export const toggleBookmark = catchAsync(async (req: Request, res: Response) => 
 
   const result = await ExamUserService.toggleBookmark(userId, questionId);
 
-  sendResponse(res, { 
-    statusCode: 200, 
-    success: true, 
-    message: result.message, 
-    data: result 
-  });
+  sendResponse(res, { statusCode: 200, success: true, message: result.message, data: result });
 });

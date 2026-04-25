@@ -1,22 +1,18 @@
 import { supabase } from '../../config/supabase';
 import { GenerateExamDTO, SubmitExamDTO, SubmitHistoryDTO } from './exams.types';
 
-// Helper function for dynamic XP calculation
 const calculateExamXP = async (correctCount: number, totalQuestions: number): Promise<number> => {
   const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
   const rules = (data?.value as any) || {};
 
-  let xp = 20; // বেস পয়েন্ট
+  let xp = 20;
   const perCorrect = rules.per_correct_answer || 5;
   xp += (correctCount * perCorrect);
   
   if (totalQuestions > 0) {
     const accuracy = correctCount / totalQuestions;
-    if (accuracy === 1) {
-      xp += 100; // ১০০% সঠিক উত্তর বোনাস
-    } else if (accuracy >= 0.8) {
-      xp += 30; // ৮০% এর বেশি সঠিক উত্তর বোনাস
-    }
+    if (accuracy === 1) xp += 100;
+    else if (accuracy >= 0.8) xp += 30;
   }
   return xp;
 };
@@ -35,11 +31,16 @@ export class ExamUserService {
   }
 
   static async getArenaQuestions(limit: number, subjectSlug?: string) {
+    // 👈 subjectSlug ফিল্টারিং যোগ করা হলো
     let query = supabase
       .from('questions')
-      .select('*, media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
+      .select('*, subjects!inner(*), media_library!media_id(*), explanation_media:media_library!explanation_media_id(*), comprehension:comprehensions(*, media_library(*))')
       .eq('is_active', true)
       .limit(limit);
+
+    if (subjectSlug) {
+      query = query.eq('subjects.slug', subjectSlug);
+    }
 
     const { data: questions, error } = await query;
     if (error) throw new Error(error.message);
@@ -57,15 +58,16 @@ export class ExamUserService {
       skipped_count: payload.skipped_count,
       time_taken: payload.time_taken,
       details_json: payload.details_json,
+      ip_address: payload.ip_address || null,
+      user_agent: payload.user_agent || null,
+      device_id: payload.device_id || null,
       submitted_at: new Date().toISOString()
     };
 
     const { data, error } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (error) throw new Error(error.message);
 
-    // 🌟 ফিক্স: exam_history_details এবং wrong_answers এ ডাটা সেভ করার লজিক
     if (data && payload.details_json && Array.isArray(payload.details_json.detailedResults)) {
-       
        const detailsToInsert = payload.details_json.detailedResults.map((d: any) => ({
           exam_history_id: data.id,
           question_id: d.question_id,
@@ -80,17 +82,12 @@ export class ExamUserService {
             user_id: userId,
             exam_id: payload.exam_id || null,
             question_id: d.question_id,
-            // 👇 ফিক্স: অবজেক্ট থাকলে স্ট্রিংয়ে রূপান্তর করা হচ্ছে
             selected_option: typeof d.selected_option === 'object' ? JSON.stringify(d.selected_option) : d.selected_option
          }));
 
        const promises = [];
-       if (detailsToInsert.length > 0) {
-          promises.push(supabase.from('exam_history_details').insert(detailsToInsert));
-       }
-       if (wrongAnswersToInsert.length > 0) {
-          promises.push(supabase.from('wrong_answers').insert(wrongAnswersToInsert));
-       }
+       if (detailsToInsert.length > 0) promises.push(supabase.from('exam_history_details').insert(detailsToInsert));
+       if (wrongAnswersToInsert.length > 0) promises.push(supabase.from('wrong_answers').insert(wrongAnswersToInsert));
 
        const results = await Promise.all(promises);
        results.forEach(res => {
@@ -105,8 +102,21 @@ export class ExamUserService {
     return data;
   }
 
-  static async submitExamResult(payload: SubmitExamDTO) {
-    const { exam_id, user_id, answers, time_taken } = payload;
+  static async submitExamResult(userId: string, payload: SubmitExamDTO) {
+    const { exam_id, answers, time_taken, ip_address, user_agent, device_id } = payload;
+    
+    // 👈 ডাটাবেস لیভেলে ডুপ্লিকেট চেকের পাশাপাশি কোড লেভেলেও প্রিভেন্টিভ চেক
+    const { data: existing } = await supabase
+      .from('exam_history')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('exam_id', exam_id)
+      .maybeSingle();
+      
+    if (existing) {
+      throw new Error('You have already submitted this exam.');
+    }
+
     const { data: examData, error: examError } = await supabase.from('exam_papers').select('default_negative_marks, total_marks').eq('id', exam_id).single();
     if (examError) throw new Error('Exam not found');
 
@@ -128,22 +138,11 @@ export class ExamUserService {
       if (!userAnswerId) {
         skipped++;
       } else if (correctOption && userAnswerId === correctOption.id) { 
-        correct++; 
-        totalScore += 1; 
-        isCorrect = true;
-        marksAwarded = 1;
+        correct++; totalScore += 1; isCorrect = true; marksAwarded = 1;
       } else { 
-        wrong++; 
-        totalScore -= (examData.default_negative_marks || 0.25); 
-        isCorrect = false;
-        marksAwarded = -(examData.default_negative_marks || 0.25);
-
-        // 🌟 ভুল উত্তরের লিস্টে যোগ করা হচ্ছে
+        wrong++; totalScore -= (examData.default_negative_marks || 0.25); isCorrect = false; marksAwarded = -(examData.default_negative_marks || 0.25);
         wrongAnswersToInsert.push({
-           user_id: user_id,
-           exam_id: exam_id,
-           question_id: q.id,
-           // 👇 ফিক্স: অবজেক্ট থাকলে স্ট্রিংয়ে রূপান্তর করা হচ্ছে
+           user_id: userId, exam_id: exam_id, question_id: q.id,
            selected_option: typeof userAnswerId === 'object' ? JSON.stringify(userAnswerId) : userAnswerId
         });
       }
@@ -151,31 +150,28 @@ export class ExamUserService {
       detailsToInsert.push({
         question_id: q.id,
         selected_option: typeof userAnswerId === 'object' ? JSON.stringify(userAnswerId) : userAnswerId || null,
-        is_correct: isCorrect,
-        marks_awarded: marksAwarded
+        is_correct: isCorrect, marks_awarded: marksAwarded
       });
     });
 
     const resultPayload = {
-      exam_id, user_id, score: Math.max(0, totalScore),
+      exam_id, user_id: userId, score: Math.max(0, totalScore),
       total_marks: examData.total_marks || questions?.length || 0,
       correct_count: correct, wrong_count: wrong, skipped_count: skipped,
-      time_taken, details_json: { userAnswers: answers }
+      time_taken, details_json: { userAnswers: answers },
+      ip_address: ip_address || null,
+      user_agent: user_agent || null,
+      device_id: device_id || null
     };
 
     const { data: result, error: submitError } = await supabase.from('exam_history').insert([resultPayload]).select().single();
     if (submitError) throw new Error(submitError.message);
 
     const promises = [];
-    
     if (result && detailsToInsert.length > 0) {
-      const finalDetails = detailsToInsert.map(d => ({
-        ...d,
-        exam_history_id: result.id
-      }));
+      const finalDetails = detailsToInsert.map(d => ({ ...d, exam_history_id: result.id }));
       promises.push(supabase.from('exam_history_details').insert(finalDetails));
     }
-
     if (wrongAnswersToInsert.length > 0) {
       promises.push(supabase.from('wrong_answers').insert(wrongAnswersToInsert));
     }
@@ -187,7 +183,7 @@ export class ExamUserService {
 
     const totalQuestions = questions?.length || 0;
     const earnedXP = await calculateExamXP(correct, totalQuestions);
-    await supabase.rpc('update_user_progress', { p_user_id: user_id, p_coins: 0, p_xp: earnedXP });
+    await supabase.rpc('update_user_progress', { p_user_id: userId, p_coins: 0, p_xp: earnedXP });
 
     return result;
   }
@@ -203,9 +199,7 @@ export class ExamUserService {
     if (error) throw new Error(error.message);
     
     const { error: battleError } = await supabase.from('group_battles').insert({
-       exam_id: data.id, 
-       initiated_by: challengerId, 
-       status: 'pending',
+       exam_id: data.id, initiated_by: challengerId, status: 'pending',
        scores_snapshot: { [challengerId]: 0, [opponentId]: 0 }
     });
     if (battleError) throw new Error(battleError.message);
@@ -213,15 +207,8 @@ export class ExamUserService {
     return data;
   }
 
-  // 🌟 নতুন ফাংশন: বুকমার্ক টগল করার জন্য
   static async toggleBookmark(userId: string, questionId: string) {
-    const { data: existing, error: fetchError } = await supabase
-      .from('bookmarks')
-      .select('id')
-      .eq('user_id', userId)
-      .eq('question_id', questionId)
-      .maybeSingle();
-
+    const { data: existing, error: fetchError } = await supabase.from('bookmarks').select('id').eq('user_id', userId).eq('question_id', questionId).maybeSingle();
     if (fetchError) throw new Error(fetchError.message);
 
     if (existing) {

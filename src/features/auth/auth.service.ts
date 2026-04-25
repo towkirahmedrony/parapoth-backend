@@ -35,6 +35,24 @@ export const authService = {
     if (error) console.error('Failed to update activity log:', error);
   },
 
+  // 👈 নতুন: প্রোডাকশন-সেফ আইপি এবং ডিভাইস লগিং
+  async logUserDevice(userId: string, deviceId: string | null, ipAddress: string): Promise<void> {
+    const payload = { 
+      user_id: userId, 
+      device_id: deviceId || null, 
+      ip_address: ipAddress, 
+      last_active_at: new Date().toISOString() 
+    }; 
+    
+    const { error } = await supabase
+      .from('user_devices')
+      .upsert(payload, { onConflict: 'user_id,device_id' }); 
+      
+    if (error) { 
+      console.error('Failed to log user device/IP:', error.message); 
+    } 
+  },
+
   async getUserRole(userId: string): Promise<string> {
     const { data, error } = await supabase.from('user_roles').select('role').eq('user_id', userId).eq('is_active', true).single();
     if (error && error.code !== 'PGRST116') console.error('Error fetching role:', error.message);
@@ -91,7 +109,6 @@ export const authService = {
 
   async grantSignupXP(userId: string): Promise<void> {
     const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
-    // According to frontend: Signup Bonus (Coins for new user)
     const coins = (data?.value as any)?.signup_bonus || 50; 
     await supabase.rpc('update_user_progress', { p_coins: coins, p_user_id: userId, p_xp: 0 });
   },

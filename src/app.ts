@@ -34,11 +34,14 @@ import referralRoutes from './features/referral/referral.routes';
 import { contactRoutes } from './features/contact/contact.routes';
 import reportRoutes from './features/reports/reports.routes'; 
 import economyRoutes from './features/economy/economy.routes';
-import appBuilderRoutes from './features/app-builder/app-builder.routes'; // 👈 নতুন অ্যাপ বিল্ডার রাউট
+import appBuilderRoutes from './features/app-builder/app-builder.routes';
 
 dotenv.config();
 
 const app: Application = express();
+
+// 👈 Render বা প্রক্সির আড়ালে আসল IP পাওয়ার জন্য Trust Proxy এনাবল করা হলো (1 hop)
+app.set('trust proxy', 1);
 
 // Environment variable থেকে আসা কমা-যুক্ত URL গুলোকে ভেঙে Array বানানো
 const envClientUrls = process.env.CLIENT_URL 
@@ -95,7 +98,7 @@ app.use('/api/v1/exams/admin', ExamAdminRoutes);
 
 // সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট, রিপোর্ট, ইকোনমি ও অ্যাপ বিল্ডার মডিউল রাউট
 app.use('/api/v1/system', systemRoutes); 
-app.use('/api/v1/app-builder', appBuilderRoutes); // 👈 অ্যাপ বিল্ডার মডিউল রেজিস্টার করা হলো
+app.use('/api/v1/app-builder', appBuilderRoutes);
 app.use('/api/v1/finance', financeRoutes); 
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
 app.use('/api/v1/notifications', notificationRoutes); 
