@@ -436,13 +436,9 @@ export const getQuestionsBank = catchAsync(async (req: Request, res: Response) =
     message: 'Bank fetched',
     data: {
       questions: result.data,
-
-      // Backward-compatible fields
       total: result.pagination.total,
       page: result.pagination.page,
       limit: result.pagination.limit,
-
-      // Production-level fields
       pagination: result.pagination,
       stats: result.stats,
       filters,
@@ -482,11 +478,12 @@ export const getInstitutions = catchAsync(async (_req: Request, res: Response) =
 export const createInstitution = catchAsync(async (req: Request, res: Response) => {
   const payload = req.body as Partial<InstitutionPayload>;
 
-  if (!isNonEmptyString(payload.name_bn) || !isNonEmptyString(payload.type)) {
+  // Updated to include required CODE validation
+  if (!isNonEmptyString(payload.name_bn) || !isNonEmptyString(payload.type) || !isNonEmptyString(payload.code)) {
     return sendResponse(res, {
       statusCode: 400,
       success: false,
-      message: 'name_bn and type are required',
+      message: 'name_bn, code and type are required',
     });
   }
 

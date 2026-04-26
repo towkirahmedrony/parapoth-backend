@@ -143,13 +143,14 @@ export interface AuthenticatedUser {
   id: string;
 }
 
-// Institution Types
 export type InstitutionType = 'board' | 'college' | 'school' | 'university' | 'admission';
 
 export interface InstitutionPayload {
   name_bn: string;
-  short_name?: string | null;
   name_en?: string | null;
+  short_name?: string | null;
+  code: string;
+  aliases?: string[] | null;
   type: InstitutionType;
   location?: string | null;
   is_active?: boolean;
