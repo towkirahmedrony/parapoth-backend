@@ -69,6 +69,21 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+
+// Request logger: helps diagnose slow/failing production API calls.
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+
+  res.on("finish", () => {
+    console.log(
+      `[REQ] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms`
+    );
+  });
+
+  next();
+});
+
+
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
