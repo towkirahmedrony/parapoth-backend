@@ -69,21 +69,6 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
-
-// Request logger: helps diagnose slow/failing production API calls.
-app.use((req, res, next) => {
-  const startedAt = Date.now();
-
-  res.on("finish", () => {
-    console.log(
-      `[REQ] ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms`
-    );
-  });
-
-  next();
-});
-
-
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
@@ -102,7 +87,10 @@ app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/admin/content', contentRoutes);
 app.use('/api/v1/community/admin', communityAdminRoutes);
 app.use('/api/v1/community/user', communityUserRoutes);
-app.use('/api/v1/dashboard', dashboardAdminRoutes);
+
+// 👇 ড্যাশবোর্ড রাউটটি এখানে আপডেট করা হয়েছে 
+app.use('/api/v1/admin/dashboard', dashboardAdminRoutes);
+
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/enterprise', enterpriseRoutes);
 app.use('/api/v1/leaderboard', leaderboardRoutes);
