@@ -6,6 +6,7 @@ export const QUESTION_STATUSES = [
   'approved',
   'rejected',
   'published',
+  'archived',
   'deleted',
   'flagged',
   'pending',
@@ -81,10 +82,44 @@ export interface AuditFilterParams {
 
 export interface QuestionBankFilters {
   subject_id?: string;
+  chapter_id?: string;
+  topic_id?: string;
   difficulty?: string;
   type?: string;
   status?: string;
   search?: string;
+}
+
+export interface QuestionBankPagination {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface QuestionBankStats {
+  total: number;
+  published: number;
+  approved: number;
+  pending: number;
+  review: number;
+  draft: number;
+  archived: number;
+  deleted: number;
+  rejected: number;
+  flagged: number;
+  withExplanation: number;
+  withoutExplanation: number;
+  withMedia: number;
+  withoutCorrectAnswer: number;
+}
+
+export interface QuestionBankResult {
+  data: unknown[];
+  pagination: QuestionBankPagination;
+  stats: QuestionBankStats;
 }
 
 export interface BulkComprehensionQuestionInput extends Partial<QuestionPayload> {
@@ -108,7 +143,7 @@ export interface AuthenticatedUser {
   id: string;
 }
 
-// 👇 নতুন যুক্ত করা Institution Types 👇
+// Institution Types
 export type InstitutionType = 'board' | 'college' | 'school' | 'university' | 'admission';
 
 export interface InstitutionPayload {
