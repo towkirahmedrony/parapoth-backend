@@ -1,8 +1,7 @@
 import { randomUUID, createHash } from 'crypto';
 import { supabase } from '../../config/supabase';
-import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams, QuestionBankFilters } from './content.types';
+import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams, QuestionBankFilters, InstitutionPayload } from './content.types';
 
-// ইম্পোর্ট পাথ আপনার দেওয়া লোকেশন অনুযায়ী আপডেট করা হয়েছে
 import type { TablesInsert, TablesUpdate } from '../../types/database.type';
 
 const generateContentHash = (questionData: Record<string, unknown>): string => {
@@ -16,36 +15,22 @@ const generateContentHash = (questionData: Record<string, unknown>): string => {
 };
 
 export const getSubjects = async () => {
-  const { data, error } = await supabase
-    .from('subjects')
-    .select('id, name_en, name_bn, is_premium, slug, description, sequence, is_active, icon_url, curriculum_version, language')
-    .order('sequence');
-
+  const { data, error } = await supabase.from('subjects').select('id, name_en, name_bn, is_premium, slug, description, sequence, is_active, icon_url, curriculum_version, language').order('sequence');
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const getChapters = async (subjectId?: string) => {
-  let query = supabase
-    .from('chapters')
-    .select('id, name_en, name_bn, subject_id, is_premium, slug, description, sequence, is_active, curriculum_version, language')
-    .order('sequence');
-
+  let query = supabase.from('chapters').select('id, name_en, name_bn, subject_id, is_premium, slug, description, sequence, is_active, curriculum_version, language').order('sequence');
   if (subjectId) query = query.eq('subject_id', subjectId);
-
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const getTopics = async (chapterId?: string) => {
-  let query = supabase
-    .from('topics')
-    .select('id, name_en, name_bn, chapter_id, is_premium, slug, sequence, is_active, curriculum_version, language')
-    .order('sequence');
-
+  let query = supabase.from('topics').select('id, name_en, name_bn, chapter_id, is_premium, slug, sequence, is_active, curriculum_version, language').order('sequence');
   if (chapterId) query = query.eq('chapter_id', chapterId);
-
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return data;
@@ -102,14 +87,12 @@ const pickAllowedFields = <T>(nodeType: NodeType, rawData: Record<string, unknow
 
   const allowedFields = allowedFieldsByType[nodeType];
   const sanitized: Record<string, unknown> = {};
-
   for (const key of allowedFields) {
     const value = rawData[key];
     if (value !== undefined) {
       sanitized[key] = value;
     }
   }
-
   return sanitized as Partial<T>;
 };
 
@@ -120,12 +103,7 @@ const generateNodeId = (nodeType: NodeType): string => {
   return `top_${suffix}`;
 };
 
-export const manageCurriculumNode = async (
-  action: 'insert' | 'update' | 'delete', 
-  nodeType: NodeType, 
-  data: Record<string, unknown>, 
-  id?: string
-) => {
+export const manageCurriculumNode = async (action: 'insert' | 'update' | 'delete', nodeType: NodeType, data: Record<string, unknown>, id?: string) => {
   if (action === 'delete') {
     if (!id) throw new Error('ID is required for delete action');
     if (nodeType === 'subject') await supabase.from('subjects').delete().eq('id', id);
@@ -178,7 +156,6 @@ export const manageCurriculumNode = async (
       return result;
     }
   }
-
   throw new Error('Invalid curriculum action');
 };
 
@@ -188,33 +165,21 @@ export const createComprehension = async (data: ComprehensionPayload) => {
   return result;
 };
 
-// MISSING FUNCTION ADDED: searchComprehensions
 export const searchComprehensions = async (query: string) => {
-  const { data, error } = await supabase
-    .from('comprehensions')
-    .select('*')
-    .ilike('body', `%${query}%`)
-    .limit(20);
-
+  const { data, error } = await supabase.from('comprehensions').select('*').ilike('body', `%${query}%`).limit(20);
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const saveSmartQuestion = async (questionData: QuestionPayload) => {
   const content_hash = generateContentHash(questionData as unknown as Record<string, unknown>);
-  
   const payloadToInsert: TablesInsert<'questions'> = {
     ...(questionData as unknown as TablesInsert<'questions'>),
     content_hash,
     status: questionData.status || 'pending'
   };
 
-  const { data, error } = await supabase
-    .from('questions')
-    .insert(payloadToInsert)
-    .select()
-    .single();
-
+  const { data, error } = await supabase.from('questions').insert(payloadToInsert).select().single();
   if (error) {
     if (error.code === '23505') throw new Error('Duplicate question found.');
     throw new Error(error.message);
@@ -235,24 +200,13 @@ export const deleteQuestion = async (id: string) => {
 };
 
 export const fetchAiQueue = async () => {
-  const { data, error } = await supabase
-    .from('questions')
-    .select('id, body, tags, confidence_score, status, difficulty_level, type')
-    .lt('confidence_score', 70)
-    .eq('status', 'review')
-    .order('confidence_score', { ascending: true })
-    .limit(50);
+  const { data, error } = await supabase.from('questions').select('id, body, tags, confidence_score, status, difficulty_level, type').lt('confidence_score', 70).eq('status', 'review').order('confidence_score', { ascending: true }).limit(50);
   if (error) throw new Error(error.message);
   return data;
 };
 
 export const reviewQuestion = async (id: string, status: 'approved' | 'rejected', adminId: string) => {
-  const { data, error } = await supabase
-    .from('questions')
-    .update({ status, approved_by: adminId, approved_at: new Date().toISOString() })
-    .eq('id', id)
-    .select()
-    .single();
+  const { data, error } = await supabase.from('questions').update({ status, approved_by: adminId, approved_at: new Date().toISOString() }).eq('id', id).select().single();
   if (error) throw new Error(error.message);
   return data;
 };
@@ -301,11 +255,7 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
 
   for (let i = 0; i < flatQuestionsToInsert.length; i += BATCH_SIZE) {
     const chunk = flatQuestionsToInsert.slice(i, i + BATCH_SIZE);
-    const { data, error } = await supabase
-      .from('questions')
-      .upsert(chunk, { onConflict: 'subject_id, content_hash', ignoreDuplicates: true })
-      .select();
-      
+    const { data, error } = await supabase.from('questions').upsert(chunk, { onConflict: 'subject_id, content_hash', ignoreDuplicates: true }).select();
     if (error) throw new Error(error.message);
     if (data) allInsertedData.push(...data);
   }
@@ -337,31 +287,48 @@ export const updateQuestionAuditStatus = async (id: string, status: string, note
 };
 
 export const getFilteredQuestions = async (filters: QuestionBankFilters, page: number = 1, limit: number = 20) => {
-  let query = supabase
-    .from('questions')
-    .select('id, body, options, explanation, difficulty_level, type, status, created_at, subject_id, chapter_id, tags, media_id', { count: 'exact' });
-
+  let query = supabase.from('questions').select('id, body, options, explanation, difficulty_level, type, status, created_at, subject_id, chapter_id, tags, media_id', { count: 'exact' });
   if (filters.subject_id) query = query.eq('subject_id', filters.subject_id);
   if (filters.difficulty) query = query.eq('difficulty_level', filters.difficulty);
   if (filters.type) query = query.eq('type', filters.type);
   if (filters.status) query = query.eq('status', filters.status);
-  
-  if (filters.search) {
-    query = query.or(`id.ilike.%${filters.search}%,body->>text_bn.ilike.%${filters.search}%,body->>text_en.ilike.%${filters.search}%`);
-  }
+  if (filters.search) query = query.or(`id.ilike.%${filters.search}%,body->>text_bn.ilike.%${filters.search}%,body->>text_en.ilike.%${filters.search}%`);
 
   const from = (page - 1) * limit;
   const to = from + limit - 1;
-
   const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
 
   if (error) throw new Error(error.message);
-
   return { data, total: count || 0 };
 };
 
 export const hardDeleteQuestion = async (id: string) => {
   const { error } = await supabase.from('questions').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+  return true;
+};
+
+// 👇 নতুন যুক্ত করা Institution Services 👇
+export const getInstitutions = async () => {
+  const { data, error } = await supabase.from('institutions' as any).select('*').order('name_bn', { ascending: true });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const createInstitution = async (payload: Partial<InstitutionPayload>) => {
+  const { data, error } = await supabase.from('institutions' as any).insert(payload).select().single();
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const updateInstitution = async (id: string, payload: Partial<InstitutionPayload>) => {
+  const { data, error } = await supabase.from('institutions' as any).update(payload).eq('id', id).select().single();
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const deleteInstitution = async (id: string) => {
+  const { error } = await supabase.from('institutions' as any).delete().eq('id', id);
   if (error) throw new Error(error.message);
   return true;
 };

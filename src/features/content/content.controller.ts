@@ -13,6 +13,7 @@ import {
   QuestionStatus,
   AuditableStatus,
   SyncIndexPayload,
+  InstitutionPayload
 } from './content.types';
 
 interface AuthReq extends Request {
@@ -95,26 +96,11 @@ export const createComprehension = catchAsync(async (req: Request, res: Response
   sendResponse(res, { statusCode: 201, success: true, message: 'Comprehension created', data: result });
 });
 
-// MISSING FUNCTION ADDED: searchComprehensions
 export const searchComprehensions = catchAsync(async (req: Request, res: Response) => {
   const query = isNonEmptyString(req.query.q) ? req.query.q.trim() : '';
-
-  if (!query) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Search query is required',
-    });
-  }
-
+  if (!query) return sendResponse(res, { statusCode: 400, success: false, message: 'Search query is required' });
   const result = await contentService.searchComprehensions(query);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Comprehensions retrieved',
-    data: result,
-  });
+  sendResponse(res, { statusCode: 200, success: true, message: 'Comprehensions retrieved', data: result });
 });
 
 export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => {
@@ -224,4 +210,31 @@ export const hardDeleteQuestion = catchAsync(async (req: Request, res: Response)
   if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
   await contentService.hardDeleteQuestion(req.params.id.trim());
   sendResponse(res, { statusCode: 200, success: true, message: 'Permanently deleted' });
+});
+
+// 👇 নতুন যুক্ত করা Institution Controllers 👇
+export const getInstitutions = catchAsync(async (_req: Request, res: Response) => {
+  const data = await contentService.getInstitutions();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institutions retrieved', data });
+});
+
+export const createInstitution = catchAsync(async (req: Request, res: Response) => {
+  const payload = req.body as Partial<InstitutionPayload>;
+  if (!isNonEmptyString(payload.name_bn) || !isNonEmptyString(payload.type)) {
+    return sendResponse(res, { statusCode: 400, success: false, message: 'name_bn and type are required' });
+  }
+  const result = await contentService.createInstitution(payload);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Institution created', data: result });
+});
+
+export const updateInstitution = catchAsync(async (req: Request, res: Response) => {
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
+  const result = await contentService.updateInstitution(req.params.id.trim(), req.body as Partial<InstitutionPayload>);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institution updated', data: result });
+});
+
+export const deleteInstitution = catchAsync(async (req: Request, res: Response) => {
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
+  await contentService.deleteInstitution(req.params.id.trim());
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institution deleted' });
 });

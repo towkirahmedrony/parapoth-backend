@@ -32,4 +32,10 @@ router.post('/ai-review-queue/:id/review', rbacGuard(['admin', 'moderator']), co
 
 router.post('/search-index/sync', rbacGuard(['admin']), contentController.syncSearchIndex);
 
+// 👇 নতুন যুক্ত করা Institution Routes 👇
+router.get('/institutions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.getInstitutions);
+router.post('/institutions', rbacGuard(['admin']), contentController.createInstitution);
+router.put('/institutions/:id', rbacGuard(['admin']), contentController.updateInstitution);
+router.delete('/institutions/:id', rbacGuard(['admin']), contentController.deleteInstitution);
+
 export default router;
