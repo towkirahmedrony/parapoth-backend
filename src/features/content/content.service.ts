@@ -218,7 +218,61 @@ export const refreshSearchIndex = async (type: 'vector' | 'global'): Promise<boo
   return true;
 };
 
+// 👇 নতুন Auto-create Missing Institutions লজিক 👇
+const autoCreateMissingInstitutions = async (questionsData: Record<string, unknown>[]) => {
+  const newInstitutionsMap = new Map<string, { name_bn: string; type: string }>();
+
+  // প্রশ্নগুলো থেকে সব রেফারেন্স বের করা
+  const extractRefs = (dataList: any[]) => {
+    for (const item of dataList) {
+      if (item.type === 'Comprehension' && Array.isArray(item.questions)) {
+        extractRefs(item.questions);
+      } else if (Array.isArray(item.exam_references)) {
+        for (const ref of item.exam_references) {
+          const kind = ref.source_kind;
+          const name = ref.institution_name || ref.board;
+          if (kind && name && ['board', 'college', 'admission'].includes(kind)) {
+            const key = `${kind}_${name.toLowerCase().trim()}`;
+            if (!newInstitutionsMap.has(key)) {
+              newInstitutionsMap.set(key, { name_bn: name.trim(), type: kind });
+            }
+          }
+        }
+      }
+    }
+  };
+
+  extractRefs(questionsData);
+
+  if (newInstitutionsMap.size === 0) return;
+
+  // ডাটাবেজে আগে থেকে থাকা নামগুলো চেক করা
+  const { data: existing } = await supabase.from('institutions' as any).select('name_bn, short_name, name_en');
+  
+  const existingNames = new Set(
+    existing?.flatMap(e => [e.name_bn?.toLowerCase(), e.short_name?.toLowerCase(), e.name_en?.toLowerCase()]).filter(Boolean) || []
+  );
+
+  // যেগুলো ডাটাবেজে নেই, সেগুলো ফিল্টার করা
+  const toInsert = Array.from(newInstitutionsMap.values()).filter(inst => 
+    !existingNames.has(inst.name_bn.toLowerCase())
+  );
+
+  // নতুনগুলো ইনসার্ট করা
+  if (toInsert.length > 0) {
+    await supabase.from('institutions' as any).insert(toInsert);
+  }
+};
+
 export const saveBulkQuestions = async (questionsData: Record<string, unknown>[], userId?: string) => {
+  // 👇 আপলোডের আগে অটো-ক্রিয়েট লজিক কল করা হচ্ছে
+  try {
+    await autoCreateMissingInstitutions(questionsData);
+  } catch (err) {
+    console.error('Error auto-creating institutions:', err);
+    // যদি কোনো কারণে ফেইল করে, তাহলেও যেন প্রশ্ন আপলোড না আটকায়
+  }
+
   const BATCH_SIZE = 500;
   let allInsertedData: unknown[] = [];
   let flatQuestionsToInsert: TablesInsert<'questions'>[] = [];
@@ -308,7 +362,6 @@ export const hardDeleteQuestion = async (id: string) => {
   return true;
 };
 
-// 👇 নতুন যুক্ত করা Institution Services 👇
 export const getInstitutions = async () => {
   const { data, error } = await supabase.from('institutions' as any).select('*').order('name_bn', { ascending: true });
   if (error) throw new Error(error.message);
