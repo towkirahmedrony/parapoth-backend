@@ -1,5 +1,8 @@
 import { Request, Response } from 'express';
-import * as contentService from './content.service';
+import * as taxonomyService from './taxonomy.service';
+import * as questionService from './question.service';
+import * as institutionService from './institution.service';
+import * as auditService from './audit.service';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import {
@@ -24,185 +27,85 @@ const NODE_TYPES: NodeType[] = ['subject', 'chapter', 'topic'];
 const CURRICULUM_ACTIONS = ['insert', 'update', 'delete'] as const;
 type CurriculumAction = (typeof CURRICULUM_ACTIONS)[number];
 
-const parsePositiveInt = (
-  value: unknown,
-  fallback: number,
-  options?: { min?: number; max?: number }
-): number => {
+const parsePositiveInt = (value: unknown, fallback: number, options?: { min?: number; max?: number }): number => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
-
   if (Number.isNaN(parsed)) return fallback;
-
   const min = options?.min ?? 1;
   const max = options?.max ?? Number.MAX_SAFE_INTEGER;
-
   if (parsed < min) return min;
   if (parsed > max) return max;
-
   return parsed;
 };
 
 const requireUserId = (req: AuthReq): string => {
   const userId = req.user?.id;
-
   if (!userId) throw new Error('Authenticated user not found');
-
   return userId;
 };
 
-const isNonEmptyString = (value: unknown): value is string => {
-  return typeof value === 'string' && value.trim().length > 0;
-};
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
 const sanitizeQueryString = (value: unknown): string | undefined => {
   if (!isNonEmptyString(value)) return undefined;
-
   const cleaned = value.trim();
-
   if (cleaned === 'all') return undefined;
-
   return cleaned;
 };
 
-const isNodeType = (value: unknown): value is NodeType => {
-  return typeof value === 'string' && NODE_TYPES.includes(value as NodeType);
-};
-
-const isCurriculumAction = (value: unknown): value is CurriculumAction => {
-  return typeof value === 'string' && CURRICULUM_ACTIONS.includes(value as CurriculumAction);
-};
+const isNodeType = (value: unknown): value is NodeType => typeof value === 'string' && NODE_TYPES.includes(value as NodeType);
+const isCurriculumAction = (value: unknown): value is CurriculumAction => typeof value === 'string' && CURRICULUM_ACTIONS.includes(value as CurriculumAction);
 
 export const getTaxonomySubjects = catchAsync(async (_req: Request, res: Response) => {
-  const subjects = await contentService.getSubjects();
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Subjects retrieved',
-    data: subjects,
-  });
+  const subjects = await taxonomyService.getSubjects();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Subjects retrieved', data: subjects });
 });
 
 export const getTaxonomyChapters = catchAsync(async (req: Request, res: Response) => {
   const subjectId = sanitizeQueryString(req.query.subjectId || req.query.subject_id);
-  const chapters = await contentService.getChapters(subjectId);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Chapters retrieved',
-    data: chapters,
-  });
+  const chapters = await taxonomyService.getChapters(subjectId);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Chapters retrieved', data: chapters });
 });
 
 export const getTaxonomyTopics = catchAsync(async (req: Request, res: Response) => {
   const chapterId = sanitizeQueryString(req.query.chapterId || req.query.chapter_id);
-  const topics = await contentService.getTopics(chapterId);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Topics retrieved',
-    data: topics,
-  });
+  const topics = await taxonomyService.getTopics(chapterId);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Topics retrieved', data: topics });
 });
 
 export const getCurriculumTree = catchAsync(async (_req: Request, res: Response) => {
-  const tree = await contentService.buildCurriculumTree();
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Curriculum tree retrieved',
-    data: tree,
-  });
+  const tree = await taxonomyService.buildCurriculumTree();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Curriculum tree retrieved', data: tree });
 });
 
 export const manageCurriculum = catchAsync(async (req: Request, res: Response) => {
-  const { action, nodeType, data, id } = req.body as {
-    action?: unknown;
-    nodeType?: unknown;
-    data?: unknown;
-    id?: unknown;
-  };
+  const { action, nodeType, data, id } = req.body as { action?: unknown; nodeType?: unknown; data?: unknown; id?: unknown; };
+  if (!isCurriculumAction(action) || !isNodeType(nodeType)) return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid action or node type' });
+  if (action !== 'insert' && !isNonEmptyString(id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID is required' });
 
-  if (!isCurriculumAction(action) || !isNodeType(nodeType)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Invalid action or node type',
-    });
-  }
-
-  if (action !== 'insert' && !isNonEmptyString(id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID is required',
-    });
-  }
-
-  const result = await contentService.manageCurriculumNode(
-    action,
-    nodeType,
-    (data as Record<string, unknown>) || {},
-    isNonEmptyString(id) ? id.trim() : undefined
-  );
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: `Curriculum ${action} successful`,
-    data: result,
-  });
+  const result = await taxonomyService.manageCurriculumNode(action, nodeType, (data as Record<string, unknown>) || {}, isNonEmptyString(id) ? id.trim() : undefined);
+  sendResponse(res, { statusCode: 200, success: true, message: `Curriculum ${action} successful`, data: result });
 });
 
 export const createComprehension = catchAsync(async (req: Request, res: Response) => {
   const payload = req.body as Partial<ComprehensionPayload>;
+  if (!isNonEmptyString(payload.body)) return sendResponse(res, { statusCode: 400, success: false, message: 'Body is required' });
 
-  if (!isNonEmptyString(payload.body)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Body is required',
-    });
-  }
-
-  const result = await contentService.createComprehension({
+  const result = await questionService.createComprehension({
     subject_id: sanitizeQueryString(payload.subject_id),
     chapter_id: sanitizeQueryString(payload.chapter_id),
     topic_id: sanitizeQueryString(payload.topic_id),
     body: payload.body.trim(),
     media_id: sanitizeQueryString(payload.media_id),
   });
-
-  sendResponse(res, {
-    statusCode: 201,
-    success: true,
-    message: 'Comprehension created',
-    data: result,
-  });
+  sendResponse(res, { statusCode: 201, success: true, message: 'Comprehension created', data: result });
 });
 
 export const searchComprehensions = catchAsync(async (req: Request, res: Response) => {
   const query = sanitizeQueryString(req.query.q) || '';
+  if (!query) return sendResponse(res, { statusCode: 400, success: false, message: 'Search query is required' });
 
-  if (!query) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Search query is required',
-    });
-  }
-
-  const result = await contentService.searchComprehensions(query);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Comprehensions retrieved',
-    data: result,
-  });
+  const result = await questionService.searchComprehensions(query);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Comprehensions retrieved', data: result });
 });
 
 export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => {
@@ -210,11 +113,7 @@ export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => 
   const body = req.body as Record<string, unknown>;
 
   if (!body.subject_id || !body.type || !body.difficulty_level || !body.body || !body.options) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Missing required question fields',
-    });
+    return sendResponse(res, { statusCode: 400, success: false, message: 'Missing required question fields' });
   }
 
   const payload: QuestionPayload = {
@@ -233,137 +132,58 @@ export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => 
     media_id: body.media_id ? String(body.media_id) : null,
     explanation_media_id: body.explanation_media_id ? String(body.explanation_media_id) : null,
     tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
-    exam_references: Array.isArray(body.exam_references)
-      ? (body.exam_references as Record<string, unknown>[])
-      : undefined,
+    exam_references: Array.isArray(body.exam_references) ? (body.exam_references as Record<string, unknown>[]) : undefined,
   };
 
-  const newQuestion = await contentService.saveSmartQuestion(payload);
-
-  sendResponse(res, {
-    statusCode: 201,
-    success: true,
-    message: 'Question saved',
-    data: newQuestion,
-  });
+  const newQuestion = await questionService.saveSmartQuestion(payload);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Question saved', data: newQuestion });
 });
 
 export const bulkCreateQuestions = catchAsync(async (req: AuthReq, res: Response) => {
   const userId = requireUserId(req);
   const questions = (req.body as { questions?: unknown }).questions;
 
-  if (!Array.isArray(questions) || questions.length === 0) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Invalid questions array',
-    });
-  }
+  if (!Array.isArray(questions) || questions.length === 0) return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid questions array' });
 
-  const result = await contentService.saveBulkQuestions(
-    questions as Record<string, unknown>[],
-    userId
-  );
-
-  sendResponse(res, {
-    statusCode: 201,
-    success: true,
-    message: 'Upload successful',
-    data: result,
-  });
+  const result = await questionService.saveBulkQuestions(questions as Record<string, unknown>[], userId);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Upload successful', data: result });
 });
 
 export const updateQuestion = catchAsync(async (req: Request, res: Response) => {
-  if (!isNonEmptyString(req.params.id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID required',
-    });
-  }
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
 
-  const result = await contentService.updateQuestion(
-    req.params.id.trim(),
-    req.body as Partial<QuestionPayload>
-  );
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Question updated',
-    data: result,
-  });
+  const result = await questionService.updateQuestion(req.params.id.trim(), req.body as Partial<QuestionPayload>);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Question updated', data: result });
 });
 
 export const deleteQuestion = catchAsync(async (req: Request, res: Response) => {
-  if (!isNonEmptyString(req.params.id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID required',
-    });
-  }
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
 
-  await contentService.deleteQuestion(req.params.id.trim());
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Question soft deleted',
-  });
+  await questionService.deleteQuestion(req.params.id.trim());
+  sendResponse(res, { statusCode: 200, success: true, message: 'Question soft deleted' });
 });
 
 export const getAiReviewQueue = catchAsync(async (_req: Request, res: Response) => {
-  const queue = await contentService.fetchAiQueue();
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'AI queue fetched',
-    data: queue,
-  });
+  const queue = await auditService.fetchAiQueue();
+  sendResponse(res, { statusCode: 200, success: true, message: 'AI queue fetched', data: queue });
 });
 
 export const reviewQuestion = catchAsync(async (req: AuthReq, res: Response) => {
   const userId = requireUserId(req);
   const status = (req.body as { status?: unknown }).status;
 
-  if (status !== 'approved' && status !== 'rejected') {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Invalid status',
-    });
-  }
+  if (status !== 'approved' && status !== 'rejected') return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid status' });
 
-  const result = await contentService.reviewQuestion(req.params.id.trim(), status, userId);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: `Status updated to ${status}`,
-    data: result,
-  });
+  const result = await auditService.reviewQuestion(req.params.id.trim(), status, userId);
+  sendResponse(res, { statusCode: 200, success: true, message: `Status updated to ${status}`, data: result });
 });
 
 export const syncSearchIndex = catchAsync(async (req: Request, res: Response) => {
   const { type } = req.body as Partial<SyncIndexPayload>;
+  if (type !== 'vector' && type !== 'global') return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid sync type' });
 
-  if (type !== 'vector' && type !== 'global') {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Invalid sync type',
-    });
-  }
-
-  await contentService.refreshSearchIndex(type);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Index refresh initiated',
-  });
+  await questionService.refreshSearchIndex(type);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Index refresh initiated' });
 });
 
 export const getQuestionsForAudit = catchAsync(async (req: Request, res: Response) => {
@@ -374,44 +194,20 @@ export const getQuestionsForAudit = catchAsync(async (req: Request, res: Respons
     search: sanitizeQueryString(req.query.search),
   };
 
-  const questions = await contentService.getAuditQuestions(filters);
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Audit queue fetched',
-    data: questions,
-  });
+  const questions = await auditService.getAuditQuestions(filters);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Audit queue fetched', data: questions });
 });
 
 export const updateAuditQuestionStatus = catchAsync(async (req: AuthReq, res: Response) => {
   const userId = requireUserId(req);
-  const { status, notes } = req.body as {
-    status?: unknown;
-    notes?: unknown;
-  };
+  const { status, notes } = req.body as { status?: unknown; notes?: unknown; };
 
   if (typeof status !== 'string' || !AUDITABLE_STATUSES.includes(status as AuditableStatus)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'Invalid audit status',
-    });
+    return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid audit status' });
   }
 
-  const result = await contentService.updateQuestionAuditStatus(
-    req.params.id.trim(),
-    status,
-    sanitizeQueryString(notes),
-    userId
-  );
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Audit status updated',
-    data: result,
-  });
+  const result = await auditService.updateQuestionAuditStatus(req.params.id.trim(), status, sanitizeQueryString(notes), userId);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Audit status updated', data: result });
 });
 
 export const getQuestionsBank = catchAsync(async (req: Request, res: Response) => {
@@ -428,111 +224,48 @@ export const getQuestionsBank = catchAsync(async (req: Request, res: Response) =
     search: sanitizeQueryString(req.query.search),
   };
 
-  const result = await contentService.getFilteredQuestions(filters, page, limit);
+  const result = await questionService.getFilteredQuestions(filters, page, limit);
 
   sendResponse(res, {
     statusCode: 200,
     success: true,
     message: 'Bank fetched',
-    data: {
-      questions: result.data,
-      total: result.pagination.total,
-      page: result.pagination.page,
-      limit: result.pagination.limit,
-      pagination: result.pagination,
-      stats: result.stats,
-      filters,
-    },
+    data: { questions: result.data, total: result.pagination.total, page: result.pagination.page, limit: result.pagination.limit, pagination: result.pagination, stats: result.stats, filters },
   });
 });
 
 export const hardDeleteQuestion = catchAsync(async (req: Request, res: Response) => {
-  if (!isNonEmptyString(req.params.id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID required',
-    });
-  }
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
 
-  await contentService.hardDeleteQuestion(req.params.id.trim());
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Permanently deleted',
-  });
+  await questionService.hardDeleteQuestion(req.params.id.trim());
+  sendResponse(res, { statusCode: 200, success: true, message: 'Permanently deleted' });
 });
 
 export const getInstitutions = catchAsync(async (_req: Request, res: Response) => {
-  const data = await contentService.getInstitutions();
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Institutions retrieved',
-    data,
-  });
+  const data = await institutionService.getInstitutions();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institutions retrieved', data });
 });
 
 export const createInstitution = catchAsync(async (req: Request, res: Response) => {
   const payload = req.body as Partial<InstitutionPayload>;
-
-  // Updated to include required CODE validation
   if (!isNonEmptyString(payload.name_bn) || !isNonEmptyString(payload.type) || !isNonEmptyString(payload.code)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'name_bn, code and type are required',
-    });
+    return sendResponse(res, { statusCode: 400, success: false, message: 'name_bn, code and type are required' });
   }
 
-  const result = await contentService.createInstitution(payload);
-
-  sendResponse(res, {
-    statusCode: 201,
-    success: true,
-    message: 'Institution created',
-    data: result,
-  });
+  const result = await institutionService.createInstitution(payload);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Institution created', data: result });
 });
 
 export const updateInstitution = catchAsync(async (req: Request, res: Response) => {
-  if (!isNonEmptyString(req.params.id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID required',
-    });
-  }
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
 
-  const result = await contentService.updateInstitution(
-    req.params.id.trim(),
-    req.body as Partial<InstitutionPayload>
-  );
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Institution updated',
-    data: result,
-  });
+  const result = await institutionService.updateInstitution(req.params.id.trim(), req.body as Partial<InstitutionPayload>);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institution updated', data: result });
 });
 
 export const deleteInstitution = catchAsync(async (req: Request, res: Response) => {
-  if (!isNonEmptyString(req.params.id)) {
-    return sendResponse(res, {
-      statusCode: 400,
-      success: false,
-      message: 'ID required',
-    });
-  }
+  if (!isNonEmptyString(req.params.id)) return sendResponse(res, { statusCode: 400, success: false, message: 'ID required' });
 
-  await contentService.deleteInstitution(req.params.id.trim());
-
-  sendResponse(res, {
-    statusCode: 200,
-    success: true,
-    message: 'Institution deleted',
-  });
+  await institutionService.deleteInstitution(req.params.id.trim());
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institution deleted' });
 });

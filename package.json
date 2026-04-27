@@ -22,6 +22,7 @@
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
     "express": "^4.18.3",
+    "fast-json-stable-stringify": "^2.1.0",
     "firebase-admin": "^13.8.0",
     "jsonwebtoken": "^9.0.3",
     "node-cron": "^4.2.1",
