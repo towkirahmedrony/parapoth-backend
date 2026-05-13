@@ -2,6 +2,8 @@ import app from './app';
 import { initNotificationCron } from './jobs/notification.job';
 import cron from 'node-cron'; // 👈 node-cron ইম্পোর্ট করা হলো
 import { processDailyStreaks, resetMonthlyFreezes } from './jobs/streak.job'; // 👈 streak.job ইম্পোর্ট করা হলো
+// 👇 নতুন: এম্বেডিং ওয়ার্কার ইম্পোর্ট করা হলো
+import { startEmbeddingWorker } from './jobs/embedding.worker';
 // import { connectRedis } from './config/redis';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 5000;
@@ -19,6 +21,11 @@ async function bootstrap() {
 
     // Cron Job ইনিশিয়ালাইজ করা হলো (নোটিফিকেশন scheduled থেকে sent করার জন্য)
     initNotificationCron();
+
+    // ==========================================
+    // 🌟 AI Embedding & Duplicate Checking 🌟
+    // ==========================================
+    startEmbeddingWorker();
 
     // ==========================================
     // 🌟 Streak System Cron Jobs 🌟

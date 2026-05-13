@@ -233,7 +233,7 @@ export type Database = {
           created_at: string | null
           id: string
           prompt_tokens: number | null
-          role: string | null
+          role: string
           session_id: string | null
         }
         Insert: {
@@ -242,7 +242,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           prompt_tokens?: number | null
-          role?: string | null
+          role: string
           session_id?: string | null
         }
         Update: {
@@ -251,7 +251,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           prompt_tokens?: number | null
-          role?: string | null
+          role?: string
           session_id?: string | null
         }
         Relationships: [
@@ -270,6 +270,7 @@ export type Database = {
           id: string
           last_active_at: string | null
           session_title: string | null
+          subject_id: string | null
           user_id: string | null
         }
         Insert: {
@@ -277,6 +278,7 @@ export type Database = {
           id?: string
           last_active_at?: string | null
           session_title?: string | null
+          subject_id?: string | null
           user_id?: string | null
         }
         Update: {
@@ -284,9 +286,17 @@ export type Database = {
           id?: string
           last_active_at?: string | null
           session_title?: string | null
+          subject_id?: string | null
           user_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_chat_sessions_subject_id_fkey"
+            columns: ["subject_id"]
+            isOneToOne: false
+            referencedRelation: "subjects"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "ai_chat_sessions_user_id_fkey"
             columns: ["user_id"]
@@ -856,6 +866,7 @@ export type Database = {
           correct_count: number | null
           created_at: string | null
           details_json: Json | null
+          device_id: string | null
           device_type: string | null
           exam_id: string | null
           id: string
@@ -868,6 +879,7 @@ export type Database = {
           submitted_at: string | null
           time_taken: number | null
           total_marks: number
+          user_agent: string | null
           user_id: string | null
           wrong_count: number | null
         }
@@ -875,6 +887,7 @@ export type Database = {
           correct_count?: number | null
           created_at?: string | null
           details_json?: Json | null
+          device_id?: string | null
           device_type?: string | null
           exam_id?: string | null
           id?: string
@@ -887,6 +900,7 @@ export type Database = {
           submitted_at?: string | null
           time_taken?: number | null
           total_marks: number
+          user_agent?: string | null
           user_id?: string | null
           wrong_count?: number | null
         }
@@ -894,6 +908,7 @@ export type Database = {
           correct_count?: number | null
           created_at?: string | null
           details_json?: Json | null
+          device_id?: string | null
           device_type?: string | null
           exam_id?: string | null
           id?: string
@@ -906,6 +921,7 @@ export type Database = {
           submitted_at?: string | null
           time_taken?: number | null
           total_marks?: number
+          user_agent?: string | null
           user_id?: string | null
           wrong_count?: number | null
         }
@@ -1579,7 +1595,9 @@ export type Database = {
         Row: {
           action_link: string | null
           action_type: string | null
+          button_text: string | null
           created_at: string | null
+          description: string | null
           end_date: string | null
           id: string
           image_url: string
@@ -1592,7 +1610,9 @@ export type Database = {
         Insert: {
           action_link?: string | null
           action_type?: string | null
+          button_text?: string | null
           created_at?: string | null
+          description?: string | null
           end_date?: string | null
           id?: string
           image_url: string
@@ -1605,7 +1625,9 @@ export type Database = {
         Update: {
           action_link?: string | null
           action_type?: string | null
+          button_text?: string | null
           created_at?: string | null
+          description?: string | null
           end_date?: string | null
           id?: string
           image_url?: string
@@ -1656,6 +1678,75 @@ export type Database = {
           target_rules?: Json | null
           title?: string
           type?: string | null
+        }
+        Relationships: []
+      }
+      institutions: {
+        Row: {
+          aliases: string[] | null
+          code: string | null
+          created_at: string | null
+          display_order: number | null
+          district: string | null
+          division: string | null
+          education_board: string | null
+          eiin: string | null
+          id: string
+          is_active: boolean | null
+          is_verified: boolean | null
+          location: string | null
+          name_bn: string
+          name_en: string | null
+          ownership: string | null
+          short_name: string | null
+          slug: string | null
+          type: string
+          upazila: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          aliases?: string[] | null
+          code?: string | null
+          created_at?: string | null
+          display_order?: number | null
+          district?: string | null
+          division?: string | null
+          education_board?: string | null
+          eiin?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_verified?: boolean | null
+          location?: string | null
+          name_bn: string
+          name_en?: string | null
+          ownership?: string | null
+          short_name?: string | null
+          slug?: string | null
+          type: string
+          upazila?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          aliases?: string[] | null
+          code?: string | null
+          created_at?: string | null
+          display_order?: number | null
+          district?: string | null
+          division?: string | null
+          education_board?: string | null
+          eiin?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_verified?: boolean | null
+          location?: string | null
+          name_bn?: string
+          name_en?: string | null
+          ownership?: string | null
+          short_name?: string | null
+          slug?: string | null
+          type?: string
+          upazila?: string | null
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -1728,6 +1819,42 @@ export type Database = {
           name_bn?: string
           name_en?: string
           updated_at?: string | null
+        }
+        Relationships: []
+      }
+      marketplace_items: {
+        Row: {
+          created_at: string | null
+          description: string
+          features: Json | null
+          icon_url: string | null
+          id: string
+          is_active: boolean | null
+          item_type: string
+          price_coins: number
+          title: string
+        }
+        Insert: {
+          created_at?: string | null
+          description: string
+          features?: Json | null
+          icon_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          item_type: string
+          price_coins: number
+          title: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string
+          features?: Json | null
+          icon_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          item_type?: string
+          price_coins?: number
+          title?: string
         }
         Relationships: []
       }
@@ -2238,6 +2365,7 @@ export type Database = {
           guardian_phone: string | null
           id: string
           institution: string | null
+          institution_id: string | null
           is_2fa_enabled: boolean | null
           is_email_verified: boolean
           is_phone_verified: boolean | null
@@ -2285,6 +2413,7 @@ export type Database = {
           guardian_phone?: string | null
           id: string
           institution?: string | null
+          institution_id?: string | null
           is_2fa_enabled?: boolean | null
           is_email_verified?: boolean
           is_phone_verified?: boolean | null
@@ -2332,6 +2461,7 @@ export type Database = {
           guardian_phone?: string | null
           id?: string
           institution?: string | null
+          institution_id?: string | null
           is_2fa_enabled?: boolean | null
           is_email_verified?: boolean
           is_phone_verified?: boolean | null
@@ -2360,6 +2490,13 @@ export type Database = {
             columns: ["current_group_id"]
             isOneToOne: false
             referencedRelation: "study_groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
             referencedColumns: ["id"]
           },
           {
@@ -2473,6 +2610,54 @@ export type Database = {
           },
         ]
       }
+      question_institution_references: {
+        Row: {
+          created_at: string | null
+          exam_name: string | null
+          exam_year: number | null
+          id: string
+          institution_id: string | null
+          is_verified: boolean | null
+          question_id: string
+          source_label: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          exam_name?: string | null
+          exam_year?: number | null
+          id?: string
+          institution_id?: string | null
+          is_verified?: boolean | null
+          question_id: string
+          source_label?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          exam_name?: string | null
+          exam_year?: number | null
+          id?: string
+          institution_id?: string | null
+          is_verified?: boolean | null
+          question_id?: string
+          source_label?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "question_institution_references_institution_id_fkey"
+            columns: ["institution_id"]
+            isOneToOne: false
+            referencedRelation: "institutions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "question_institution_references_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       question_tags: {
         Row: {
           created_at: string | null
@@ -2508,13 +2693,16 @@ export type Database = {
       }
       questions: {
         Row: {
+          answer: Json | null
           approved_at: string | null
           approved_by: string | null
+          audit_notes: string | null
           avg_time_spent: number | null
           body: Json
           chapter_id: string | null
           comprehension_id: string | null
           confidence_score: number | null
+          content_hash: string | null
           correct_attempts: number | null
           created_at: string | null
           created_by: string | null
@@ -2543,13 +2731,16 @@ export type Database = {
           updated_at: string | null
         }
         Insert: {
+          answer?: Json | null
           approved_at?: string | null
           approved_by?: string | null
+          audit_notes?: string | null
           avg_time_spent?: number | null
           body: Json
           chapter_id?: string | null
           comprehension_id?: string | null
           confidence_score?: number | null
+          content_hash?: string | null
           correct_attempts?: number | null
           created_at?: string | null
           created_by?: string | null
@@ -2578,13 +2769,16 @@ export type Database = {
           updated_at?: string | null
         }
         Update: {
+          answer?: Json | null
           approved_at?: string | null
           approved_by?: string | null
+          audit_notes?: string | null
           avg_time_spent?: number | null
           body?: Json
           chapter_id?: string | null
           comprehension_id?: string | null
           confidence_score?: number | null
+          content_hash?: string | null
           correct_attempts?: number | null
           created_at?: string | null
           created_by?: string | null
@@ -3560,13 +3754,16 @@ export type Database = {
       get_adaptive_random_questions: {
         Args: { p_limit: number; p_user_id: string }
         Returns: {
+          answer: Json | null
           approved_at: string | null
           approved_by: string | null
+          audit_notes: string | null
           avg_time_spent: number | null
           body: Json
           chapter_id: string | null
           comprehension_id: string | null
           confidence_score: number | null
+          content_hash: string | null
           correct_attempts: number | null
           created_at: string | null
           created_by: string | null
