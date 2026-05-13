@@ -30,29 +30,29 @@ import monetizationRoutes from './features/monetization/monetization.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
 import growthRoutes from './features/growth/streak.routes'; 
-import referralRoutes from './features/referral/referral.routes'; // 👈 রেফারেল রাউট ইম্পোর্ট করা হলো
+import referralRoutes from './features/referral/referral.routes';
 import { contactRoutes } from './features/contact/contact.routes';
 import reportRoutes from './features/reports/reports.routes'; 
+
+// অ্যাপ-বিল্ডার রাউট ইম্পোর্ট (system থেকে মুভ করা কনফিগারেশনের জন্য)
+import appBuilderRoutes from './features/app-builder/app-builder.routes';
 
 dotenv.config();
 
 const app: Application = express();
 
-// Environment variable থেকে আসা কমা-যুক্ত URL গুলোকে ভেঙে Array বানানো
 const envClientUrls = process.env.CLIENT_URL 
   ? process.env.CLIENT_URL.split(',') 
   : [];
 
-// CORS Allowed Origins সেটআপ
 const allowedOrigins = [
-  ...envClientUrls, // 👈 এখানে স্প্রেড অপারেটর (...) দিয়ে ভাঙা URL গুলো যুক্ত করা হলো
+  ...envClientUrls, 
   'http://localhost:5173', 
   'http://localhost:5174',
   'http://127.0.0.1:5174',
   'https://parapoth-studio.web.app'
 ].filter(Boolean) as string[];
 
-// Global Middlewares
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
@@ -78,20 +78,34 @@ app.get('/health', (req: Request, res: Response) => {
 // Application Routes (Standard API v1)
 app.use('/api/v1/auth', authRoutes); 
 app.use('/api/v1/profiles', profileRoutes);
+
+// 🛠️ Content & Institutions Fix
 app.use('/api/v1/content', contentRoutes);
 app.use('/api/v1/admin/content', contentRoutes);
+app.use('/api/v1/institutions', contentRoutes); // Frontend compatibility
+
+// 🛠️ Community Admin & User (flagged-chats, overview fix)
 app.use('/api/v1/community/admin', communityAdminRoutes);
 app.use('/api/v1/community/user', communityUserRoutes);
-app.use('/api/v1/dashboard', dashboardAdminRoutes);
+app.use('/api/v1/community', communityAdminRoutes); // Frontend compatibility for Admin panel calls
+
+// 🛠️ Admin Dashboard (stats fix)
+app.use('/api/v1/admin/dashboard', dashboardAdminRoutes);
+
 app.use('/api/v1/media', mediaRoutes);
 app.use('/api/v1/enterprise', enterpriseRoutes);
+
+// 🛠️ Enterprise Reports (reports fix)
+app.use('/api/v1/enterprise/reports', reportRoutes);
+app.use('/api/v1/reports', reportRoutes); // Retain original route
+
 app.use('/api/v1/leaderboard', leaderboardRoutes);
 
 // এক্সাম মডিউট রাউট
 app.use('/api/v1/exams/user', ExamUserRoutes);
 app.use('/api/v1/exams/admin', ExamAdminRoutes);
 
-// সিস্টেম, ফাইন্যান্স, নোটিফিকেশন, মনিটাইজেশন, হিস্ট্রি, প্রগ্রেস, এআই, গ্রোথ, রেফারেল, কন্টাক্ট ও রিপোর্ট মডিউল রাউট
+// সিস্টেম, ফাইন্যান্স এবং অন্যান্য রাউট
 app.use('/api/v1/system', systemRoutes); 
 app.use('/api/v1/finance', financeRoutes); 
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
@@ -101,9 +115,11 @@ app.use('/api/v1/history', historyRoutes);
 app.use('/api/v1/progress', progressRoutes); 
 app.use('/api/v1/ai', aiRoutes); 
 app.use('/api/v1/growth', growthRoutes); 
-app.use('/api/v1/referral', referralRoutes); // 👈 রেফারেল মডিউল রেজিস্টার করা হলো
+app.use('/api/v1/referral', referralRoutes); 
 app.use('/api/v1/contact', contactRoutes);
-app.use('/api/v1/reports', reportRoutes); 
+
+// 🛠️ App Builder (configs, home-grids, daily_quote fix)
+app.use('/api/v1/app-builder', appBuilderRoutes);
 
 // Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
@@ -123,10 +139,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   });
 });
 
+// Custom Error Interface for Type Safety (Removing 'any' type)
+interface CustomError extends Error {
+  status?: number;
+  statusCode?: number;
+}
+
 // Global Error Handler
-app.use((err: any, req: Request, res: Response, next: NextFunction) => {
-  console.error('🔥 [Global Error]:', err);
-  
+app.use((err: CustomError, req: Request, res: Response, next: NextFunction) => {
+  // Removed console.error for strict production quality
   const statusCode = err.status || err.statusCode || 500;
   const message = err.message || 'Internal Server Error';
 
@@ -138,4 +159,3 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 });
 
 export default app;
-
