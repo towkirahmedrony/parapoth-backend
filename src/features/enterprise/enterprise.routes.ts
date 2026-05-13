@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as enterpriseController from './enterprise.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
-import { rbacGuard } from '../../middlewares/rbacGuard';
+import rbacGuard from '../../middlewares/rbacGuard'; // 🛠️ Fixed import style to match project consistency
 
 const router = Router();
 
