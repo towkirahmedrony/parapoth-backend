@@ -14,7 +14,7 @@ const getEnvOrThrow = (key: string): string => {
 
 const MODEL = {
   chat: 'gemini-2.5-flash',
-  embedding: 'text-embedding-004',
+  embedding: 'gemini-embedding-001', // 👈 নতুন আপডেট করা মডেল
 } as const;
 
 const MAX_MESSAGE_LENGTH = 1200;
@@ -169,7 +169,14 @@ export const generateVectorEmbedding = async (text: string): Promise<number[]> =
     const embeddingClient = getEmbeddingGeminiClient();
     const embeddingModel = embeddingClient.getGenerativeModel({ model: MODEL.embedding });
     
-    const result = await embeddingModel.embedContent(text);
+    // 👈 ডাটাবেস যেন ক্র্যাশ না করে তাই আমরা জোড় করে 768 ডাইমেনশন চাচ্ছি
+    const requestPayload: any = {
+      content: { role: 'user', parts: [{ text }] },
+      taskType: 'RETRIEVAL_DOCUMENT',
+      outputDimensionality: 768 
+    };
+    
+    const result = await embeddingModel.embedContent(requestPayload);
     return result.embedding.values;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to generate vector embedding';
