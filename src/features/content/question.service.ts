@@ -2,6 +2,7 @@ import { supabase } from '../../config/supabase';
 import { ComprehensionPayload, QuestionPayload } from './content.types';
 import type { TablesInsert, TablesUpdate } from '../../types/database.type';
 import { autoCreateMissingInstitutions } from './institution.service';
+import crypto from 'crypto';
 
 export interface QuestionBankFilters {
   subject_id?: string;
@@ -36,7 +37,6 @@ export interface QuestionBankResult {
   stats: QuestionBankStats;
 }
 
-import crypto from 'crypto';
 const generateContentHash = (data: Record<string, unknown>) => {
   return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
 };
@@ -44,7 +44,6 @@ const escapePostgrestLikeValue = (val: string) => val.replace(/[%_\\]/g, '\\$&')
 const hasExplanation = (q: any) => !!q.explanation;
 const hasCorrectAnswer = (q: any) => !!q.options?.some((o: any) => o.is_correct);
 const hasMedia = (q: any) => !!q.media_id || !!q.explanation_media_id;
-
 
 const QUESTION_BANK_SELECT = `
   id, body, options, explanation, difficulty_level, type, status, created_at, updated_at, subject_id, chapter_id, topic_id, tags, media_id, explanation_media_id, source_type, exam_references, is_active, confidence_score
@@ -157,7 +156,7 @@ export const saveSmartQuestion = async (questionData: QuestionPayload) => {
     ...(questionData as unknown as TablesInsert<'questions'>),
     explanation: safeExplanation as string | undefined,
     content_hash,
-    status: questionData.status || 'approved', // Default changed to approved
+    status: questionData.status || 'approved',
   };
 
   const { data, error } = await supabase.from('questions').insert(payloadToInsert).select().single();
@@ -229,7 +228,8 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
             chapter_id: question.chapter_id as string || item.chapter_id as string,
             topic_id: question.topic_id as string || item.topic_id as string,
             comprehension_id: compResult.id,
-            status: question.status as string || 'approved', // Default changed to approved
+            status: 'pending',
+            is_embedding_stale: true,
             created_by: userId,
             content_hash: generateContentHash(question as Record<string, unknown>),
           });
@@ -244,7 +244,8 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
       flatQuestionsToInsert.push({
         ...(item as unknown as TablesInsert<'questions'>),
         explanation: safeExplanation as string | undefined,
-        status: item.status as string || 'approved', // Default changed to approved
+        status: 'pending',
+        is_embedding_stale: true,
         created_by: userId,
         content_hash: generateContentHash(item as Record<string, unknown>),
       });

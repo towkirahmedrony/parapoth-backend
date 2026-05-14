@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import * as contentService from './content.service';
+import * as questionService from './question.service';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import { AuditFilterParams } from './content.types';
@@ -54,7 +55,7 @@ export const bulkCreateQuestions = catchAsync(async (req: AuthReq, res: Response
     return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid payload: Questions array is required' });
   }
 
-  const result = await contentService.saveBulkQuestions(questions, req.user?.id);
+  const result = await questionService.saveBulkQuestions(questions, req.user?.id);
   sendResponse(res, { statusCode: 201, success: true, message: `${result.length} questions uploaded successfully`, data: result });
 });
 
@@ -112,7 +113,6 @@ export const updateAuditQuestionStatus = catchAsync(async (req: AuthReq, res: Re
 });
 
 export const getQuestionsBank = catchAsync(async (req: Request, res: Response) => {
-  // Extract pagination and filters
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
   
