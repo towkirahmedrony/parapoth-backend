@@ -2,6 +2,15 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 
 export const AppBuilderService = {
   // ================== APP CONFIGS (Generic) ==================
+  async getAllConfigs() {
+    const { data, error } = await supabaseAdmin
+      .from('app_configs')
+      .select('*');
+    
+    if (error) throw error;
+    return data || [];
+  },
+
   async getConfig(key: string) {
     const { data, error } = await supabaseAdmin
       .from('app_configs')

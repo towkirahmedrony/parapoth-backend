@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { 
+  getAllConfigs,
   getHomeGrids, saveHomeGrid, reorderHomeGrids, deleteHomeGrid,
   getDailyQuote, saveDailyQuote,
   getThemeConfig, saveThemeConfig,
@@ -9,6 +10,9 @@ import {
 } from './app-builder.controller';
 
 const router = Router();
+
+// --- General Configs Route ---
+router.get('/configs', getAllConfigs);
 
 // --- Home Grids Routes ---
 router.get('/home-grids', getHomeGrids);

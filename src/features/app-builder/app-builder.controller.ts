@@ -1,6 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppBuilderService } from './app-builder.service';
 
+export const getAllConfigs = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const data = await AppBuilderService.getAllConfigs();
+    res.status(200).json({ success: true, data });
+  } catch (error) { next(error); }
+};
+
 // --- Home Grids Controllers ---
 export const getHomeGrids = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
