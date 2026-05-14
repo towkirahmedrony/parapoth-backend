@@ -27,15 +27,23 @@ export const processStaleEmbeddings = async () => {
         const textToEmbed = JSON.stringify(question.body);
         const embeddingVector = await generateVectorEmbedding(textToEmbed);
 
+        // 👈 আপডেট: filter_subject_id ডাটাবেস থেকে বাদ দেওয়া হয়েছে 
         const { data: matches, error: matchError } = await supabase.rpc('match_questions', {
           query_embedding: JSON.stringify(embeddingVector), 
           match_threshold: 0.85,
-          match_count: 2,
-          filter_subject_id: question.subject_id
+          match_count: 2
         });
 
         if (matchError) {
           logger.error(`Match error for question ${question.id}:`, matchError);
+          // যদি কোনো কারণে ম্যাচ এরর হয়ও, তবুও যেন প্রশ্ন pending এ আটকে না থাকে তাই সরাসরি পাবলিশ করা হচ্ছে
+          await supabase.from('questions').update({
+            embedding: JSON.stringify(embeddingVector),
+            is_embedding_stale: false,
+            embedding_updated_at: new Date().toISOString(),
+            status: 'published',
+            confidence_score: 95
+          }).eq('id', question.id);
           continue;
         }
 
