@@ -118,14 +118,16 @@ export const getQuestionsBank = catchAsync(async (req: Request, res: Response) =
   
   const filters = {
     subject_id: req.query.subject_id as string,
+    chapter_id: req.query.chapter_id as string,
+    topic_id: req.query.topic_id as string,
     difficulty: req.query.difficulty as string,
     type: req.query.type as string,
     status: req.query.status as string,
     search: req.query.search as string,
   };
 
-  const { data, total } = await contentService.getFilteredQuestions(filters, page, limit);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Question bank fetched', data: { questions: data, total, page, limit } });
+  const result = await questionService.getFilteredQuestions(filters, page, limit);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Question bank fetched successfully', data: result });
 });
 
 export const hardDeleteQuestion = catchAsync(async (req: Request, res: Response) => {
