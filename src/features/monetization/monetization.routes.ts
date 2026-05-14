@@ -37,4 +37,13 @@ router.route('/quests')
 // Manual Override
 router.post('/manual-override', monetizationController.grantManualOverride);
 
+// Marketplace Items
+router.route('/marketplace-items')
+  .get(monetizationController.getMarketplaceItems)
+  .post(monetizationController.createMarketplaceItem);
+
+router.route('/marketplace-items/:id')
+  .put(monetizationController.updateMarketplaceItem)
+  .delete(monetizationController.deleteMarketplaceItem);
+
 export default router;

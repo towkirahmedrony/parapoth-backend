@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import * as monetizationService from './monetization.service';
-// Default import ব্যবহার করা হলো
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response'; 
 
@@ -57,4 +56,25 @@ export const createQuest = catchAsync(async (req: Request, res: Response) => {
 export const grantManualOverride = catchAsync(async (req: Request, res: Response) => {
   const result = await monetizationService.grantManualSubscription(req.body);
   sendResponse(res, { statusCode: 200, success: true, message: 'Manual subscription granted successfully', data: result });
+});
+
+// ================= Marketplace Items =================
+export const getMarketplaceItems = catchAsync(async (req: Request, res: Response) => {
+  const items = await monetizationService.getMarketplaceItems();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Marketplace items fetched successfully', data: items });
+});
+
+export const createMarketplaceItem = catchAsync(async (req: Request, res: Response) => {
+  const item = await monetizationService.createMarketplaceItem(req.body);
+  sendResponse(res, { statusCode: 201, success: true, message: 'Marketplace item created successfully', data: item });
+});
+
+export const updateMarketplaceItem = catchAsync(async (req: Request, res: Response) => {
+  const item = await monetizationService.updateMarketplaceItem(req.params.id, req.body);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Marketplace item updated successfully', data: item });
+});
+
+export const deleteMarketplaceItem = catchAsync(async (req: Request, res: Response) => {
+  await monetizationService.deleteMarketplaceItem(req.params.id);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Marketplace item deleted successfully' });
 });

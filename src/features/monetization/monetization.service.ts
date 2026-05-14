@@ -1,7 +1,7 @@
 import { supabase } from '../../config/supabase';
 import { 
   CreatePlanDTO, CreateCouponDTO, CreateAchievementDTO, 
-  CreateQuestDTO, ManualOverrideDTO 
+  CreateQuestDTO, ManualOverrideDTO, CreateMarketplaceItemDTO 
 } from './monetization.types';
 
 // ================= Plans =================
@@ -69,7 +69,6 @@ export const createQuest = async (payload: CreateQuestDTO) => {
 
 // ================= Manual Override =================
 export const grantManualSubscription = async (payload: ManualOverrideDTO) => {
-  // Find user by email or phone
   const { data: user, error: userError } = await supabase
     .from('profiles')
     .select('id')
@@ -78,7 +77,6 @@ export const grantManualSubscription = async (payload: ManualOverrideDTO) => {
 
   if (userError || !user) throw new Error('User not found');
 
-  // Fetch plan duration
   const { data: plan, error: planError } = await supabase
     .from('subscription_plans')
     .select('duration_days')
@@ -90,7 +88,6 @@ export const grantManualSubscription = async (payload: ManualOverrideDTO) => {
   const endDate = new Date();
   endDate.setDate(endDate.getDate() + plan.duration_days);
 
-  // Insert into user_subscriptions
   const { data, error } = await supabase.from('user_subscriptions').insert({
     user_id: user.id,
     plan_id: payload.plan_id,
@@ -102,8 +99,32 @@ export const grantManualSubscription = async (payload: ManualOverrideDTO) => {
 
   if (error) throw error;
   
-  // Update profile status
   await supabase.from('profiles').update({ subscription_status: 'premium' }).eq('id', user.id);
 
   return data;
+};
+
+// ================= Marketplace Items =================
+export const getMarketplaceItems = async () => {
+  const { data, error } = await supabase.from('marketplace_items').select('*').order('created_at', { ascending: false });
+  if (error) throw error;
+  return data;
+};
+
+export const createMarketplaceItem = async (payload: CreateMarketplaceItemDTO) => {
+  const { data, error } = await supabase.from('marketplace_items').insert(payload).select().single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateMarketplaceItem = async (id: string, payload: Partial<CreateMarketplaceItemDTO>) => {
+  const { data, error } = await supabase.from('marketplace_items').update(payload).eq('id', id).select().single();
+  if (error) throw error;
+  return data;
+};
+
+export const deleteMarketplaceItem = async (id: string) => {
+  const { error } = await supabase.from('marketplace_items').delete().eq('id', id);
+  if (error) throw error;
+  return true;
 };

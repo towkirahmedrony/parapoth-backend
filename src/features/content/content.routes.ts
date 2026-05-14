@@ -1,11 +1,22 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import * as contentController from './content.controller';
+import * as institutionService from './institution.service';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import catchAsync from '../../lib/utils/catchAsync';
+import sendResponse from '../../lib/utils/response';
 
 const router = Router();
 
 router.use(requireAuth);
+
+// ==========================================
+// 🚀 ADDED: Institutions Route
+// ==========================================
+router.get('/institutions', rbacGuard(['admin', 'moderator', 'teacher']), catchAsync(async (req: Request, res: Response) => {
+  const institutions = await institutionService.getInstitutions();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Institutions retrieved', data: institutions });
+}));
 
 router.get('/curriculum', contentController.getCurriculumTree);
 router.get('/taxonomy/subjects', contentController.getTaxonomySubjects);
@@ -21,7 +32,7 @@ router.get('/questions/audit', rbacGuard(['admin', 'moderator']), contentControl
 router.patch('/questions/:id/status', rbacGuard(['admin', 'moderator']), contentController.updateAuditQuestionStatus);
 
 // ==========================================
-// 🚀 ADDED: Question Bank Routes
+// Question Bank Routes
 // ==========================================
 router.get('/questions', rbacGuard(['admin', 'moderator', 'teacher']), contentController.getQuestionsBank);
 router.delete('/questions/:id/hard', rbacGuard(['admin']), contentController.hardDeleteQuestion);

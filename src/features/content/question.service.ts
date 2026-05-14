@@ -3,7 +3,6 @@ import { ComprehensionPayload, QuestionPayload } from './content.types';
 import type { TablesInsert, TablesUpdate } from '../../types/database.type';
 import { autoCreateMissingInstitutions } from './institution.service';
 
-// Added Missing Types Locally
 export interface QuestionBankFilters {
   subject_id?: string;
   chapter_id?: string;
@@ -37,7 +36,6 @@ export interface QuestionBankResult {
   stats: QuestionBankStats;
 }
 
-// Added Missing Utils Locally
 import crypto from 'crypto';
 const generateContentHash = (data: Record<string, unknown>) => {
   return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
@@ -159,7 +157,7 @@ export const saveSmartQuestion = async (questionData: QuestionPayload) => {
     ...(questionData as unknown as TablesInsert<'questions'>),
     explanation: safeExplanation as string | undefined,
     content_hash,
-    status: questionData.status || 'pending',
+    status: questionData.status || 'approved', // Default changed to approved
   };
 
   const { data, error } = await supabase.from('questions').insert(payloadToInsert).select().single();
@@ -231,7 +229,7 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
             chapter_id: question.chapter_id as string || item.chapter_id as string,
             topic_id: question.topic_id as string || item.topic_id as string,
             comprehension_id: compResult.id,
-            status: question.status as string || 'pending',
+            status: question.status as string || 'approved', // Default changed to approved
             created_by: userId,
             content_hash: generateContentHash(question as Record<string, unknown>),
           });
@@ -246,7 +244,7 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
       flatQuestionsToInsert.push({
         ...(item as unknown as TablesInsert<'questions'>),
         explanation: safeExplanation as string | undefined,
-        status: item.status as string || 'pending',
+        status: item.status as string || 'approved', // Default changed to approved
         created_by: userId,
         content_hash: generateContentHash(item as Record<string, unknown>),
       });

@@ -36,3 +36,13 @@ export interface ManualOverrideDTO {
   user_identifier: string; // email or phone
   plan_id: string;
 }
+
+export interface CreateMarketplaceItemDTO {
+  title: string;
+  description: string;
+  item_type: string;
+  price_coins: number;
+  features?: any;
+  icon_url?: string | null;
+  is_active?: boolean;
+}
