@@ -45,7 +45,7 @@ export const getFlaggedChats = async () => {
         id,
         content,
         meta_data,
-        profiles ( full_name ),
+        profiles!group_chats_sender_id_fkey ( full_name ),
         study_groups ( name )
       )
     `)
