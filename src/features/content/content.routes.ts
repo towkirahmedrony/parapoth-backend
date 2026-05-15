@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import * as contentController from './content.controller';
+import * as institutionController from './institution.controller';
 import * as institutionService from './institution.service';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
@@ -17,6 +18,10 @@ router.get('/institutions', rbacGuard(['admin', 'moderator', 'teacher']), catchA
   const institutions = await institutionService.getInstitutions();
   sendResponse(res, { statusCode: 200, success: true, message: 'Institutions retrieved', data: institutions });
 }));
+
+router.post('/institutions', rbacGuard(['admin', 'moderator']), institutionController.createInstitution);
+router.put('/institutions/:id', rbacGuard(['admin', 'moderator']), institutionController.updateInstitution);
+router.delete('/institutions/:id', rbacGuard(['admin']), institutionController.deleteInstitution);
 
 router.get('/curriculum', contentController.getCurriculumTree);
 router.get('/taxonomy/subjects', contentController.getTaxonomySubjects);
