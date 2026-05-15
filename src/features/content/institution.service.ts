@@ -6,6 +6,12 @@ export interface InstitutionPayload {
   [key: string]: any;
 }
 
+// 🚀 Deterministic Code Generator for unknown institutions
+const generateDeterministicCode = (name: string, kind: string) => {
+  const cleanString = name.toLowerCase().replace(/[\.\,\-\(\)\&\s]/g, '');
+  return `${kind.toUpperCase()}_${cleanString.substring(0, 15)}`;
+};
+
 export const getInstitutions = async () => {
   const { data, error } = await supabase
     .from('institutions')
@@ -63,40 +69,42 @@ export const autoCreateMissingInstitutions = async (questionsData: Record<string
 
           if (kind && rawName && typeof rawName === 'string' && ['board', 'college', 'admission', 'school', 'university'].includes(kind)) {
             const nameStr = rawName.trim();
-            const key = `${kind}_${nameStr.toLowerCase()}`;
-
-            if (!newInstitutionsMap.has(key)) {
-              const isBengali = /[\u0980-\u09FF]/.test(nameStr);
-              let resolvedBnName = isBengali ? nameStr : (ref.name_bn || ref.institution_name_bn || ref.board_bn);
-              
-              if (!resolvedBnName && !isBengali) {
-                if (kind === 'board') {
-                  resolvedBnName = COMMON_BOARD_NAMES[nameStr.toLowerCase()];
-                } else if (kind === 'college') {
-                  resolvedBnName = COMMON_COLLEGE_NAMES[nameStr.toLowerCase()];
-                }
+            const isBengali = /[\u0980-\u09FF]/.test(nameStr);
+            let resolvedBnName = isBengali ? nameStr : (ref.name_bn || ref.institution_name_bn || ref.board_bn);
+            
+            if (!resolvedBnName && !isBengali) {
+              if (kind === 'board') {
+                resolvedBnName = COMMON_BOARD_NAMES[nameStr.toLowerCase()];
+              } else if (kind === 'college') {
+                resolvedBnName = COMMON_COLLEGE_NAMES[nameStr.toLowerCase()];
               }
-              
-              if (!resolvedBnName) resolvedBnName = nameStr; 
+            }
+            
+            if (!resolvedBnName) resolvedBnName = nameStr; 
 
-              let resolvedEnName = !isBengali ? nameStr : (ref.name_en || ref.institution_name_en || ref.board_en || null);
-              
-              let generatedCode = COMMON_COLLEGE_CODES[resolvedBnName];
-              
-              if (!generatedCode) {
-                generatedCode = nameStr.toUpperCase().replace(/[^A-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
-                if (!generatedCode || isBengali) {
-                  generatedCode = `${kind.toUpperCase()}_${Date.now().toString().slice(-6)}`;
-                }
-              }
+            let resolvedEnName = !isBengali ? nameStr : (ref.name_en || ref.institution_name_en || ref.board_en || null);
+            
+            // 🚀 ইউজার প্রোভাইডেড EIIN রিসিভ করা (ফ্রন্টএন্ড থেকে পাঠানো)
+            const userProvidedEiin = ref.eiin as string | null;
 
-              newInstitutionsMap.set(key, {
+            // 🚀 কোড সিলেকশন লজিক: ১. ইউজার দিলে সেটি, ২. কনস্ট্যান্ট ম্যাপ থেকে, ৩. না থাকলে জেনারেটেড কোড
+            let finalCode = userProvidedEiin || COMMON_COLLEGE_CODES[resolvedBnName];
+            const eiinValue = userProvidedEiin || COMMON_COLLEGE_CODES[resolvedBnName] || null;
+
+            if (!finalCode) {
+              finalCode = generateDeterministicCode(resolvedBnName, kind);
+            }
+
+            // Map-এ ইনসার্ট করার সময় কোড-কে Key হিসেবে ব্যবহার
+            if (!newInstitutionsMap.has(finalCode)) {
+              newInstitutionsMap.set(finalCode, {
                 name_bn: resolvedBnName,
                 name_en: resolvedEnName,
-                code: generatedCode,
-                eiin: COMMON_COLLEGE_CODES[resolvedBnName] || null, // Optional: if you have an EIIN column
+                code: finalCode, // ইউনিক আইডেন্টিফায়ার
+                eiin: eiinValue,
                 aliases: [nameStr],
                 type: kind,
+                is_verified: !!eiinValue // EIIN থাকলে সরাসরি ভেরিফাইড
               });
             }
           }
@@ -109,32 +117,13 @@ export const autoCreateMissingInstitutions = async (questionsData: Record<string
 
   if (newInstitutionsMap.size === 0) return;
 
-  const { data: existing } = await supabase
-    .from('institutions')
-    .select('name_bn, short_name, name_en, code, aliases');
+  // 🚀 ডাটাবেইজ থেকে বিদ্যমান কোডগুলো চেক করা
+  const { data: existing } = await supabase.from('institutions').select('code');
+  const existingCodes = new Set(existing?.map((item: any) => item.code) || []);
 
-  const existingKeys = new Set(
-    existing?.flatMap((item: any) => [
-      item.name_bn?.toLowerCase(),
-      item.name_en?.toLowerCase(),
-      item.short_name?.toLowerCase(),
-      item.code?.toLowerCase(),
-      ...(item.aliases || []).map((a: string) => a.toLowerCase())
-    ]).filter(Boolean) || []
-  );
-
+  // শুধুমাত্র সেই ইনস্টিটিউশনগুলো ফিল্টার করা যাদের কোড ডাটাবেইজে নেই
   const toInsert = Array.from(newInstitutionsMap.values()).filter(
-    (institution) => {
-      const nameBnLow = institution.name_bn?.toLowerCase();
-      const nameEnLow = institution.name_en?.toLowerCase();
-      const codeLow = institution.code?.toLowerCase();
-      
-      return !(
-        (nameBnLow && existingKeys.has(nameBnLow)) ||
-        (nameEnLow && existingKeys.has(nameEnLow)) ||
-        (codeLow && existingKeys.has(codeLow))
-      );
-    }
+    (inst) => !existingCodes.has(inst.code)
   );
 
   if (toInsert.length > 0) {
