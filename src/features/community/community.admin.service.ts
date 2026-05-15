@@ -41,7 +41,7 @@ export const getFlaggedChats = async () => {
       type,
       description,
       created_at,
-      group_chats!target_message_id (
+      group_chats!user_reports_target_message_id_fkey (
         id,
         content,
         meta_data,
@@ -75,7 +75,6 @@ export const executeModeration = async (messageId: string, action: string, admin
   if (fetchErr || !message) throw new Error('Message not found');
 
   if (action === 'warn') {
-    // FIXED: Using title_en and body_en instead of title and body
     await supabase.from('notifications').insert({
       target_user_id: message.sender_id,
       title_en: 'Community Warning',
@@ -114,7 +113,6 @@ export const executeModeration = async (messageId: string, action: string, admin
   return { success: true, action };
 };
 
-// FIXED: Using auto_ban_dictionary table instead of app_configs
 export const getAutoBanDictionary = async (): Promise<AutoBanDictData> => {
   const { data, error } = await supabase
     .from('auto_ban_dictionary')
@@ -167,9 +165,9 @@ export const getLiveChats = async (groupId?: string) => {
       content, 
       created_at, 
       is_flagged,
-      profiles (full_name),
+      profiles!group_chats_sender_id_fkey (full_name),
       meta_data
-    `) // FIXED: Added is_flagged
+    `) 
     .order('created_at', { ascending: false })
     .limit(50);
 
