@@ -12,6 +12,8 @@ export interface QuestionBankFilters {
   type?: string;
   status?: string;
   search?: string;
+  institution_id?: string; // 🚀 New filter
+  year?: string;           // 🚀 New filter
 }
 
 export interface QuestionBankStats {
@@ -71,6 +73,19 @@ const applyQuestionBankFilters = <T extends any>(
       nextQuery = nextQuery.not('status', 'in', '("deleted","archived")');
     } else {
       nextQuery = nextQuery.eq('status', filters.status);
+    }
+  }
+
+  // 🚀 New: JSONB Array filtering logic
+  if (filters.institution_id) {
+    nextQuery = nextQuery.contains('exam_references', [{ code: filters.institution_id }]);
+  }
+
+  if (filters.year) {
+    const numericYear = Number(filters.year);
+    if (!isNaN(numericYear)) {
+      // Using PostgREST 'cs' (contains) operator within an OR query
+      nextQuery = nextQuery.or(`exam_references.cs.[{"year":${numericYear}}],exam_references.cs.[{"exam_year":${numericYear}}]`);
     }
   }
 
