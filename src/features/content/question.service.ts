@@ -12,9 +12,10 @@ export interface QuestionBankFilters {
   type?: string;
   status?: string;
   search?: string;
-  institution_type?: string; // 🚀 Added
+  institution_type?: string;
   institution_id?: string;
   year?: string;
+  _instTerms?: string[]; // Internal array to hold resolved names
 }
 
 export interface QuestionBankStats {
@@ -77,19 +78,33 @@ const applyQuestionBankFilters = <T extends any>(
     }
   }
 
-  // 🚀 FIXED: Wrapped arrays with JSON.stringify() to prevent 'invalid input syntax for type json'
+  // 🚀 FIXED: Dynamic lookup for Institutions (Code OR Name match)
   if (filters.institution_id) {
-    nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
+    if (filters._instTerms && filters._instTerms.length > 0) {
+      const orClauses: string[] = [];
+      // ১. যদি কোনো প্রশ্নে code সেভ করা থাকে
+      orClauses.push(`exam_references.cs."[{\\"code\\":\\"${filters.institution_id}\\"}]"`);
+      
+      // ২. যদি পুরনো প্রশ্নে শুধু নাম সেভ করা থাকে (যেমন: board, name, institution_name)
+      for (const term of filters._instTerms) {
+        const safeTerm = term.replace(/"/g, '\\"'); // Escape quotes for JSON
+        orClauses.push(`exam_references.cs."[{\\"board\\":\\"${safeTerm}\\"}]"`);
+        orClauses.push(`exam_references.cs."[{\\"institution_name\\":\\"${safeTerm}\\"}]"`);
+        orClauses.push(`exam_references.cs."[{\\"name\\":\\"${safeTerm}\\"}]"`);
+      }
+      // কমা সেপারেটেড স্ট্রিংগুলো PostgREST OR এর মাধ্যমে যুক্ত করা হলো
+      nextQuery = nextQuery.or(orClauses.join(','));
+    } else {
+      nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
+    }
   } else if (filters.institution_type) {
-    // If no specific institution is selected but type is selected, fetch all of that type
     nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ source_kind: filters.institution_type }]));
   }
 
   if (filters.year) {
     const numericYear = Number(filters.year);
     if (!isNaN(numericYear)) {
-      // Safe stringified PostgREST formatting for JSONB arrays
-      nextQuery = nextQuery.or(`exam_references.cs.[{"year":${numericYear}}],exam_references.cs.[{"exam_year":${numericYear}}]`);
+      nextQuery = nextQuery.or(`exam_references.cs."[{\\"year\\":${numericYear}}]",exam_references.cs."[{\\"exam_year\\":${numericYear}}]"`);
     }
   }
 
@@ -282,6 +297,16 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
 };
 
 export const getFilteredQuestions = async (filters: QuestionBankFilters, page: number = 1, limit: number = 20): Promise<QuestionBankResult> => {
+  
+  // 🚀 Resolve Institution names & aliases dynamically before filtering
+  if (filters.institution_id && filters.institution_id !== 'all') {
+    const { data: inst } = await supabase.from('institutions').select('name_bn, name_en, aliases, code').eq('code', filters.institution_id).single();
+    if (inst) {
+      const terms = [inst.code, inst.name_bn, inst.name_en, ...(inst.aliases || [])].filter(Boolean);
+      filters._instTerms = [...new Set(terms)]; // Remove duplicates
+    }
+  }
+
   const safePage = Math.max(1, Number(page) || 1);
   const safeLimit = Math.min(Math.max(1, Number(limit) || 20), 100);
   const from = (safePage - 1) * safeLimit;
