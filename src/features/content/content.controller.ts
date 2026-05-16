@@ -112,7 +112,6 @@ export const updateAuditQuestionStatus = catchAsync(async (req: AuthReq, res: Re
     sendResponse(res, { statusCode: 200, success: true, message: `Question audit status updated to ${status}`, data: result });
 });
 
-// 🚀 Updated: Fetch Filtered Questions with Advanced Filters
 export const getQuestionsBank = catchAsync(async (req: Request, res: Response) => {
   const page = parseInt(req.query.page as string) || 1;
   const limit = parseInt(req.query.limit as string) || 20;
@@ -125,8 +124,9 @@ export const getQuestionsBank = catchAsync(async (req: Request, res: Response) =
     type: req.query.type as string,
     status: req.query.status as string,
     search: req.query.search as string,
-    institution_id: req.query.institution_id as string, // New
-    year: req.query.year as string,                     // New
+    institution_type: req.query.institution_type as string, // 🚀 Added
+    institution_id: req.query.institution_id as string,
+    year: req.query.year as string,
   };
 
   const result = await questionService.getFilteredQuestions(filters, page, limit);

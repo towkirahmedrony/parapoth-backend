@@ -12,8 +12,9 @@ export interface QuestionBankFilters {
   type?: string;
   status?: string;
   search?: string;
-  institution_id?: string; // 🚀 New filter
-  year?: string;           // 🚀 New filter
+  institution_type?: string; // 🚀 Added
+  institution_id?: string;
+  year?: string;
 }
 
 export interface QuestionBankStats {
@@ -76,15 +77,18 @@ const applyQuestionBankFilters = <T extends any>(
     }
   }
 
-  // 🚀 New: JSONB Array filtering logic
+  // 🚀 FIXED: Wrapped arrays with JSON.stringify() to prevent 'invalid input syntax for type json'
   if (filters.institution_id) {
-    nextQuery = nextQuery.contains('exam_references', [{ code: filters.institution_id }]);
+    nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
+  } else if (filters.institution_type) {
+    // If no specific institution is selected but type is selected, fetch all of that type
+    nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ source_kind: filters.institution_type }]));
   }
 
   if (filters.year) {
     const numericYear = Number(filters.year);
     if (!isNaN(numericYear)) {
-      // Using PostgREST 'cs' (contains) operator within an OR query
+      // Safe stringified PostgREST formatting for JSONB arrays
       nextQuery = nextQuery.or(`exam_references.cs.[{"year":${numericYear}}],exam_references.cs.[{"exam_year":${numericYear}}]`);
     }
   }
