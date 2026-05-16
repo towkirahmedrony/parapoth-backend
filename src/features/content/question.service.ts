@@ -15,7 +15,6 @@ export interface QuestionBankFilters {
   institution_type?: string;
   institution_id?: string;
   year?: string;
-  _instTerms?: string[]; // Internal array to hold resolved names
 }
 
 export interface QuestionBankStats {
@@ -75,36 +74,6 @@ const applyQuestionBankFilters = <T extends any>(
       nextQuery = nextQuery.not('status', 'in', '("deleted","archived")');
     } else {
       nextQuery = nextQuery.eq('status', filters.status);
-    }
-  }
-
-  // 🚀 FIXED: Dynamic lookup for Institutions (Code OR Name match)
-  if (filters.institution_id) {
-    if (filters._instTerms && filters._instTerms.length > 0) {
-      const orClauses: string[] = [];
-      // ১. যদি কোনো প্রশ্নে code সেভ করা থাকে
-      orClauses.push(`exam_references.cs."[{\\"code\\":\\"${filters.institution_id}\\"}]"`);
-      
-      // ২. যদি পুরনো প্রশ্নে শুধু নাম সেভ করা থাকে (যেমন: board, name, institution_name)
-      for (const term of filters._instTerms) {
-        const safeTerm = term.replace(/"/g, '\\"'); // Escape quotes for JSON
-        orClauses.push(`exam_references.cs."[{\\"board\\":\\"${safeTerm}\\"}]"`);
-        orClauses.push(`exam_references.cs."[{\\"institution_name\\":\\"${safeTerm}\\"}]"`);
-        orClauses.push(`exam_references.cs."[{\\"name\\":\\"${safeTerm}\\"}]"`);
-      }
-      // কমা সেপারেটেড স্ট্রিংগুলো PostgREST OR এর মাধ্যমে যুক্ত করা হলো
-      nextQuery = nextQuery.or(orClauses.join(','));
-    } else {
-      nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
-    }
-  } else if (filters.institution_type) {
-    nextQuery = nextQuery.contains('exam_references', JSON.stringify([{ source_kind: filters.institution_type }]));
-  }
-
-  if (filters.year) {
-    const numericYear = Number(filters.year);
-    if (!isNaN(numericYear)) {
-      nextQuery = nextQuery.or(`exam_references.cs."[{\\"year\\":${numericYear}}]",exam_references.cs."[{\\"exam_year\\":${numericYear}}]"`);
     }
   }
 
@@ -298,22 +267,75 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
 
 export const getFilteredQuestions = async (filters: QuestionBankFilters, page: number = 1, limit: number = 20): Promise<QuestionBankResult> => {
   
-  // 🚀 Resolve Institution names & aliases dynamically before filtering
+  let query = supabase.from('questions').select(QUESTION_BANK_SELECT, { count: 'exact' });
+
+  // 🚀 1. Institution Dynamic Resolving & JSONB Filtering
   if (filters.institution_id && filters.institution_id !== 'all') {
-    const { data: inst } = await supabase.from('institutions').select('name_bn, name_en, aliases, code').eq('code', filters.institution_id).single();
+    const { data: inst } = await supabase.from('institutions').select('name_bn, name_en, aliases, code, eiin').eq('code', filters.institution_id).single();
+    
     if (inst) {
-      const terms = [inst.code, inst.name_bn, inst.name_en, ...(inst.aliases || [])].filter(Boolean);
-      filters._instTerms = [...new Set(terms)]; // Remove duplicates
+      const orClauses: string[] = [];
+      
+      // Helper function to correctly format JSONB contains queries
+      const addClause = (key: string, val: string | number) => {
+        const valStr = String(val);
+        // কমা থাকলে skip করছি কারণ কমা PostgREST এর .or() break করে দেয়
+        if (!valStr || valStr.includes(',')) return; 
+        const jsonStr = JSON.stringify([{ [key]: val }]);
+        orClauses.push(`exam_references.cs.${jsonStr}`);
+      };
+
+      addClause('code', inst.code);
+      addClause('eiin', inst.code); // Fallback: If code is mistakenly saved as EIIN in questions
+      if (inst.eiin) addClause('eiin', inst.eiin);
+      
+      const terms = [...new Set([inst.name_bn, inst.name_en, ...(inst.aliases || [])])].filter(Boolean);
+      for (const term of terms) {
+        addClause('board', term);
+        addClause('institution_name', term);
+        addClause('name', term);
+      }
+
+      if (orClauses.length > 0) {
+        query = query.or(orClauses.join(','));
+      } else {
+        query = query.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
+      }
+    } else {
+      query = query.contains('exam_references', JSON.stringify([{ code: filters.institution_id }]));
     }
+  } else if (filters.institution_type && filters.institution_type !== 'all') {
+    query = query.contains('exam_references', JSON.stringify([{ source_kind: filters.institution_type }]));
   }
+
+  // 🚀 2. Year Filtering (Handling both String and Number types in JSONB)
+  if (filters.year && filters.year !== 'all') {
+    const yearStr = filters.year.trim();
+    const yearNum = Number(yearStr);
+    const yearOrClauses: string[] = [];
+    
+    const addYearClause = (key: string, val: string | number) => {
+      const jsonStr = JSON.stringify([{ [key]: val }]);
+      yearOrClauses.push(`exam_references.cs.${jsonStr}`);
+    };
+
+    addYearClause('year', yearStr);
+    addYearClause('exam_year', yearStr);
+    if (!isNaN(yearNum)) {
+      addYearClause('year', yearNum);
+      addYearClause('exam_year', yearNum);
+    }
+    
+    query = query.or(yearOrClauses.join(','));
+  }
+
+  // Apply basic filters
+  query = applyQuestionBankFilters(query, filters);
 
   const safePage = Math.max(1, Number(page) || 1);
   const safeLimit = Math.min(Math.max(1, Number(limit) || 20), 100);
   const from = (safePage - 1) * safeLimit;
   const to = from + safeLimit - 1;
-
-  let query = supabase.from('questions').select(QUESTION_BANK_SELECT, { count: 'exact' });
-  query = applyQuestionBankFilters(query, filters);
 
   const { data, count, error } = await query.order('created_at', { ascending: false }).range(from, to);
   if (error) throw new Error(error.message);
