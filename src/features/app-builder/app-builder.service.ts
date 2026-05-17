@@ -55,8 +55,8 @@ export const AppBuilderService = {
     return data;
   },
 
-  async reorderHomeGrids(grids: { id: string, serial_order: number }[]) {
-    // Supabase upsert for bulk update
+  async reorderHomeGrids(grids: any[]) {
+    // Frontend is now sending the full objects. Type adjusted to any[]
     const { data, error } = await supabaseAdmin
       .from('home_grids')
       .upsert(grids, { onConflict: 'id' })
@@ -132,7 +132,7 @@ export const AppBuilderService = {
   },
 
   async updateLevels(levels: any[]) {
-    // First, format data to ensure empty strings for IDs are removed so DB generates them
+    // Format data to ensure empty strings for IDs are removed so DB generates them for new inserts
     const formattedLevels = levels.map(level => {
       if (!level.id) delete level.id;
       return level;

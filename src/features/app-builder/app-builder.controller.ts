@@ -48,7 +48,7 @@ export const getDailyQuote = async (req: Request, res: Response, next: NextFunct
 
 export const saveDailyQuote = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { value } = req.body;
+    const { value } = req.body; // Frontend sends { value: payload }
     const data = await AppBuilderService.saveConfig('daily_quote', value);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
@@ -63,7 +63,7 @@ export const getThemeConfig = async (req: Request, res: Response, next: NextFunc
 
 export const saveThemeConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { value } = req.body;
+    const { value } = req.body; // Frontend sends { value: config }
     const data = await AppBuilderService.saveConfig('theme_config', value);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
@@ -78,7 +78,7 @@ export const getXpRules = async (req: Request, res: Response, next: NextFunction
 
 export const saveXpRules = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    // XP rules frontend sends the whole object as body without 'value' wrapper based on UI
+    // XP rules frontend sends the whole object as body without 'value' wrapper
     const data = await AppBuilderService.saveConfig('xp_rules', req.body);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
@@ -101,6 +101,7 @@ export const createBanner = async (req: Request, res: Response, next: NextFuncti
 
 export const updateBanner = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
+    // Frontend sends updates object directly as body
     const data = await AppBuilderService.updateBanner(req.params.id, req.body);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
