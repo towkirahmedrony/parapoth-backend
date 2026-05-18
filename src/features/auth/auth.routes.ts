@@ -7,6 +7,9 @@ const router = Router();
 // Public Routes (or initial login steps)
 router.post('/admin/login', authController.adminLoginInit);
 
+// 🚀 [NEW]: সাধারণ ইউজারদের ডিভাইস এবং আইপি সেভ করার রাউট
+router.post('/save-device', authController.saveDeviceInfo);
+
 // Protected Routes (Require Authentication via Supabase Token)
 router.use(requireAuth);
 
