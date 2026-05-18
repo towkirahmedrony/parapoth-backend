@@ -41,6 +41,9 @@ dotenv.config();
 
 const app: Application = express();
 
+// 🚀 [FIX]: প্রক্সি সার্ভার থেকে আসল ইউজারের আইপি রিসিভ করার জন্য এনাবল করা হলো
+app.set('trust proxy', true);
+
 const envClientUrls = process.env.CLIENT_URL 
   ? process.env.CLIENT_URL.split(',') 
   : [];

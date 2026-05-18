@@ -6,6 +6,15 @@ import crypto from 'crypto';
 
 const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
 
+// 🚀 [FIX]: IP Address বের করার হেল্পার ফাংশন
+const getClientIp = (req: Request): string => {
+  let ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
+  if (typeof ipAddress === 'string' && ipAddress.includes(',')) {
+    return ipAddress.split(',')[0].trim();
+  }
+  return ipAddress as string;
+};
+
 export const authController = {
   async getProfile(req: Request, res: Response) {
     try {
@@ -36,7 +45,6 @@ export const authController = {
   },
 
   async setup2FA(req: Request, res: Response) {
-    // ... (আপনার আগের setup2FA কোড যা ছিল তাই থাকবে)
     try {
       const userId = (req as any).user?.id;
       const email = (req as any).user?.email || 'admin@parapoth.com';
@@ -60,8 +68,6 @@ export const authController = {
 
   async adminLoginInit(req: Request, res: Response) {
     try {
-      // 👈 এখানে আসল প্রোডাকশনে ডাটাবেজ থেকে ইউজারের 2FA স্ট্যাটাস চেক করতে হবে
-      // আপাতত আপনার mock প্রোফাইল দিয়ে রাখা হলো
       const mockAdminProfile = { id: 'some-uuid', is_2fa_enabled: true }; 
       const trustedDeviceToken = req.cookies?.['trusted_admin_device'];
 
@@ -83,9 +89,10 @@ export const authController = {
 
   async verify2FA(req: Request, res: Response) {
     try {
-      // 👈 requireAuth মিডলওয়্যার থেকে ভেরিফাইড userId পেয়ে যাচ্ছি!
       const userId = (req as any).user?.id; 
       const { token, trustDevice } = req.body;
+      
+      const ipAddress = getClientIp(req);
 
       if (!userId) return res.status(401).json({ error: "User ID not found. Token might be invalid." });
 
@@ -106,7 +113,8 @@ export const authController = {
 
       if (trustDevice) {
         const deviceToken = crypto.randomBytes(32).toString('hex');
-        await authService.saveTrustedDevice(userId, deviceToken);
+        
+        await authService.saveTrustedDevice(userId, deviceToken, ipAddress);
 
         res.cookie('trusted_admin_device', deviceToken, {
           maxAge: 30 * 24 * 60 * 60 * 1000,
@@ -117,6 +125,29 @@ export const authController = {
       }
 
       return res.status(200).json({ status: 'success', message: '2FA Verified Successfully' });
+    } catch (error: any) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+
+  // 🚀 [NEW]: সাধারণ ইউজারদের IP এবং ডিভাইস সেভ করার জন্য নতুন মেথড
+  async saveDeviceInfo(req: Request, res: Response) {
+    try {
+      const { user_id, device_name, os_or_browser } = req.body;
+      
+      if (!user_id) return res.status(400).json({ error: "User ID is required" });
+
+      // রিকোয়েস্ট থেকে ইউজারের আসল IP বের করা হচ্ছে
+      const ipAddress = getClientIp(req);
+
+      await authService.saveUserDevice({
+        user_id,
+        device_name,
+        os_or_browser,
+        ip_address: ipAddress
+      });
+
+      return res.status(200).json({ success: true, message: 'Device and IP saved successfully' });
     } catch (error: any) {
       return res.status(500).json({ error: error.message });
     }

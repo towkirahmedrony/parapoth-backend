@@ -12,7 +12,6 @@ export const authService = {
     if (data.account_status !== 'active') throw new Error(`Account ${data.account_status}. Please contact support.`);
     
     // --- Auto Referral Logic ---
-    // ব্যাকগ্রাউন্ডে চেক করবে ইউজারের মেটাডেটাতে কোনো রেফারেল কোড আছে কিনা
     this.checkAndProcessReferral(userId).catch(err => 
       console.error('Background auto-referral processing error:', err)
     );
@@ -21,13 +20,11 @@ export const authService = {
   },
 
   async checkAndProcessReferral(userId: string): Promise<void> {
-    // Auth টেবিল থেকে ইউজার মেটাডেটা আনা
     const { data: userData, error } = await supabaseAdmin.auth.admin.getUserById(userId);
     if (error || !userData?.user) return;
 
     const referredByCode = userData.user.user_metadata?.referred_by_code;
     
-    // যদি কোড থাকে, তাহলে রেফারেল প্রসেস করা
     if (referredByCode) {
       await ReferralService.processAutoReferral(userId, referredByCode);
     }
@@ -68,9 +65,32 @@ export const authService = {
     return (data.settings as any).two_factor_secret || null;
   },
 
-  async saveTrustedDevice(userId: string, deviceToken: string): Promise<void> {
-    const { error } = await supabase.from('admin_sessions').insert({ admin_id: userId, device_id: deviceToken, is_2fa_verified: true, last_active: new Date().toISOString() });
+  // 🚀 [FIX]: IP Address রিসিভ ও সেভ করার ব্যবস্থা করা হলো
+  async saveTrustedDevice(userId: string, deviceToken: string, ipAddress?: string): Promise<void> {
+    const { error } = await supabase.from('admin_sessions').insert({ 
+      admin_id: userId, 
+      device_id: deviceToken, 
+      is_2fa_verified: true, 
+      ip_address: ipAddress || null, 
+      last_active: new Date().toISOString() 
+    });
     if (error) throw new Error('Failed to save trusted device');
+  },
+
+  // 🚀 [FIX]: user_devices_rows টেবিলের জন্য এক্সট্রা মেথড তৈরি করে রাখা হলো
+  // সাধারণ ইউজার লগইন হওয়ার সময় কন্ট্রোলার থেকে আইপি সহ এই ফাংশনটি কল করবেন
+  async saveUserDevice(payload: { user_id: string, device_name?: string, device_id?: string, fcm_token?: string, os_or_browser?: string, ip_address?: string }): Promise<void> {
+    const { error } = await supabase.from('user_devices_rows').insert([{
+      user_id: payload.user_id,
+      device_name: payload.device_name || 'Unknown',
+      device_id: payload.device_id,
+      fcm_token: payload.fcm_token,
+      last_active_at: new Date().toISOString(),
+      is_trusted: true,
+      os_or_browser: payload.os_or_browser,
+      ip_address: payload.ip_address || null
+    }]);
+    if (error) console.error('Failed to save user device:', error);
   },
 
   async isDeviceTrusted(userId: string, deviceToken: string): Promise<boolean> {
