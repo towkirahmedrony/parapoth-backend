@@ -43,11 +43,19 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
       device_name: payload.device_name || 'Web Client',
       os_or_browser: payload.os_or_browser || 'Unknown',
       fcm_token: payload.fcm_token,
+      ip_address: payload.ip_address || null,
       last_active_at: new Date().toISOString(),
       is_trusted: true
-    }, { onConflict: 'device_id' });
+    }, { onConflict: 'device_id' })
+    .select();
 
-  if (error) throw error;
+  if (error) {
+    console.error('Device token save failed:', error);
+    throw new Error(error.message);
+  }
+
+  console.log('Device token saved:', data);
+
   return data;
 };
 

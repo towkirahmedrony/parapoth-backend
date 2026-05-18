@@ -8,4 +8,5 @@ export interface IDeviceTokenPayload {
   device_name?: string;
   os_or_browser?: string;
   fcm_token: string | null;
+  ip_address?: string | null;
 }
