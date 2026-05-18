@@ -27,7 +27,7 @@ export const markNotificationAsRead = async (userId: string, payload: IMarkReadP
       is_clicked: payload.is_clicked || false,
       read_at: new Date().toISOString(),
       clicked_at: payload.is_clicked ? new Date().toISOString() : null,
-      device_platform: 'web'
+      device_platform: 'web',
     });
 
   if (error) throw error;
@@ -35,18 +35,31 @@ export const markNotificationAsRead = async (userId: string, payload: IMarkReadP
 };
 
 export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenPayload) => {
+  if (!userId) {
+    throw new Error('User ID is required');
+  }
+
+  if (!payload.device_id) {
+    throw new Error('Device ID is required');
+  }
+
   const { data, error } = await supabase
     .from('user_devices')
-    .upsert({
-      device_id: payload.device_id,
-      user_id: userId,
-      device_name: payload.device_name || 'Web Client',
-      os_or_browser: payload.os_or_browser || 'Unknown',
-      fcm_token: payload.fcm_token,
-      ip_address: payload.ip_address || null,
-      last_active_at: new Date().toISOString(),
-      is_trusted: true
-    }, { onConflict: 'device_id' })
+    .upsert(
+      {
+        user_id: userId,
+        device_id: payload.device_id,
+        device_name: payload.device_name || 'Web Client',
+        os_or_browser: payload.os_or_browser || 'Unknown',
+        fcm_token: payload.fcm_token,
+        ip_address: payload.ip_address || null,
+        last_active_at: new Date().toISOString(),
+        is_trusted: true,
+      },
+      {
+        onConflict: 'user_id,device_id',
+      }
+    )
     .select();
 
   if (error) {
@@ -54,7 +67,7 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
     throw new Error(error.message);
   }
 
-  console.log('Device token saved:', data);
+  console.log('Device token saved or updated:', data);
 
   return data;
 };
@@ -62,7 +75,13 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
 // ==========================================
 // FCM Web Push Notification Function
 // ==========================================
-export const sendPushNotification = async (userId: string, title: string, body: string, imageUrl?: string, actionLink?: string) => {
+export const sendPushNotification = async (
+  userId: string,
+  title: string,
+  body: string,
+  imageUrl?: string,
+  actionLink?: string
+) => {
   try {
     const { data: userDevices, error } = await supabaseAdmin
       .from('user_devices')
@@ -72,7 +91,11 @@ export const sendPushNotification = async (userId: string, title: string, body: 
 
     if (error || !userDevices || userDevices.length === 0) return;
 
-    const tokens = userDevices.map(device => device.fcm_token);
+    const tokens = userDevices
+      .map((device) => device.fcm_token)
+      .filter(Boolean) as string[];
+
+    if (tokens.length === 0) return;
 
     const message = {
       data: {
@@ -80,9 +103,9 @@ export const sendPushNotification = async (userId: string, title: string, body: 
         body: body || '',
         image_url: imageUrl || '',
         action_link: actionLink || '/',
-        type: 'general'
+        type: 'general',
       },
-      tokens: tokens
+      tokens,
     };
 
     const response = await messaging.sendEachForMulticast(message);
@@ -95,9 +118,16 @@ export const sendPushNotification = async (userId: string, title: string, body: 
 // ==========================================
 // Automated System Notification Helper
 // ==========================================
-export const sendRewardNotification = async (userId: string, title: string, body: string, coins: number = 0, xp: number = 0) => {
+export const sendRewardNotification = async (
+  userId: string,
+  title: string,
+  body: string,
+  coins: number = 0,
+  xp: number = 0
+) => {
   try {
     let metadata = {};
+
     if (coins > 0 || xp > 0) {
       metadata = { reward: { coins, xp } };
     }
@@ -108,19 +138,23 @@ export const sendRewardNotification = async (userId: string, title: string, body
       title_bn: title,
       body_en: body,
       body_bn: body,
-      type: 'reward', // স্পেশাল টাইপ যা ফ্রন্টএন্ডে গিফট আইকন দেখাতে সাহায্য করবে
+      type: 'reward',
       channel: 'in_app',
-      meta_data: metadata
+      meta_data: metadata,
     });
 
     if (error) {
       console.error('❌ Failed to send reward notification to DB:', error);
-      return; 
+      return;
     }
 
-    // Call Web Push Notification
-    await sendPushNotification(userId, title, body, "https://parapoth.com/icons/reward.webp", "/profile");
-
+    await sendPushNotification(
+      userId,
+      title,
+      body,
+      'https://parapoth.com/icons/reward.webp',
+      '/profile'
+    );
   } catch (err) {
     console.error('❌ Notification Exception:', err);
   }
