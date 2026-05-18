@@ -12,7 +12,6 @@ export const authService = {
     if (!data) throw new Error('Profile not found');
     if (data.account_status !== 'active') throw new Error(`Account ${data.account_status}. Please contact support.`);
     
-    // --- Auto Referral Logic ---
     this.checkAndProcessReferral(userId).catch(err => 
       console.error('Background auto-referral processing error:', err)
     );
@@ -77,10 +76,14 @@ export const authService = {
     if (error) throw new Error('Failed to save trusted device');
   },
 
-  // 🚀 [FIX]: সঠিক টেবিল নেম এবং RLS বাইপাসের জন্য Admin ক্লায়েন্ট ব্যবহার করা হলো
   async saveUserDevice(payload: { user_id: string, device_name?: string, device_id?: string, fcm_token?: string, os_or_browser?: string, ip_address?: string }): Promise<void> {
-    const deviceId = payload.device_id || crypto.randomUUID(); // ডাটাবেইজে device_id Required, তাই জেনারেট করা হলো
+    const deviceId = payload.device_id || crypto.randomUUID();
     
+    // 🚀 [FIX]: খালি স্ট্রিং থাকলে সেটাকে null করে দেওয়া হলো যাতে Supabase এ না আটকায়
+    const finalIp = (payload.ip_address && payload.ip_address.length > 0) ? payload.ip_address : null;
+
+    console.log(`[authService.saveUserDevice] Final IP before insert: "${finalIp}"`);
+
     const { error } = await supabaseAdmin.from('user_devices').insert([{
       user_id: payload.user_id,
       device_name: payload.device_name || 'Unknown',
@@ -89,10 +92,14 @@ export const authService = {
       last_active_at: new Date().toISOString(),
       is_trusted: true,
       os_or_browser: payload.os_or_browser,
-      ip_address: payload.ip_address || null
+      ip_address: finalIp
     }]);
 
-    if (error) console.error('Failed to save user device:', error.message);
+    if (error) {
+      console.error('[authService.saveUserDevice] Supabase Error:', error.message);
+    } else {
+      console.log('[authService.saveUserDevice] Successfully inserted row.');
+    }
   },
 
   async isDeviceTrusted(userId: string, deviceToken: string): Promise<boolean> {

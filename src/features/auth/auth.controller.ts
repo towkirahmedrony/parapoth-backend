@@ -7,27 +7,36 @@ import crypto from 'crypto';
 const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
 
 const getClientIp = (req: Request): string => {
-  const forwarded = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'];
+  // Render এবং অন্যান্য প্রক্সির জন্য সব সম্ভাব্য হেডার চেক
+  const xForwardedFor = req.headers['x-forwarded-for'];
+  const cfConnectingIp = req.headers['cf-connecting-ip'];
+  const xRealIp = req.headers['x-real-ip'];
   
-  // --- IP Debugging Start ---
-  console.log('\n--- IP Debugging Start ---');
-  console.log('1. All Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('2. Forwarded Header:', forwarded);
-  console.log('3. Express req.ip:', req.ip);
-  console.log('4. Socket Remote Address:', req.socket?.remoteAddress);
-  
-  let ipAddress = '';
-  if (Array.isArray(forwarded)) {
-    ipAddress = forwarded[0]; 
-  } else if (typeof forwarded === 'string') {
-    ipAddress = forwarded.split(',')[0].trim(); 
+  let ip = '';
+
+  if (typeof xForwardedFor === 'string') {
+    ip = xForwardedFor.split(',')[0].trim();
+  } else if (Array.isArray(xForwardedFor)) {
+    ip = xForwardedFor[0];
+  } else if (typeof cfConnectingIp === 'string') {
+    ip = cfConnectingIp;
+  } else if (typeof xRealIp === 'string') {
+    ip = xRealIp;
+  } else {
+    ip = req.ip || req.socket.remoteAddress || '';
   }
 
-  const finalIp = ipAddress || req.ip || req.socket?.remoteAddress || '';
-  console.log('5. Final Extracted IP:', finalIp);
-  console.log('--- IP Debugging End ---\n');
+  // IPv6 ফরম্যাট ক্লিন করা (যেমন ::ffff:127.0.0.1 থেকে শুধু 127.0.0.1 করা)
+  if (ip.includes('::ffff:')) {
+    ip = ip.split(':').pop() || ip;
+  }
 
-  return finalIp as string;
+  console.log('\n--- [IP EXTRACTION DEBUG] ---');
+  console.log('X-Forwarded-For:', xForwardedFor);
+  console.log('Final Extracted IP:', ip);
+  console.log('------------------------------\n');
+
+  return ip;
 };
 
 export const authController = {
@@ -147,26 +156,27 @@ export const authController = {
 
   async saveDeviceInfo(req: Request, res: Response) {
     try {
-      const { user_id, device_name, os_or_browser } = req.body;
+      // 🚀 [FIX]: fcm_token এবং device_id বডি থেকে রিসিভ করার ব্যবস্থা করা হলো
+      const { user_id, device_name, os_or_browser, fcm_token, device_id } = req.body;
       
       if (!user_id) return res.status(400).json({ error: "User ID is required" });
 
       const ipAddress = getClientIp(req);
       
-      console.log(`[saveDeviceInfo] Saving IP: "${ipAddress}" for User: ${user_id}`);
+      console.log(`[saveDeviceInfo] Attempting to save IP: "${ipAddress}" for User: ${user_id}`);
 
       await authService.saveUserDevice({
         user_id,
         device_name,
+        device_id,
+        fcm_token,
         os_or_browser,
         ip_address: ipAddress
       });
-      
-      console.log(`[saveDeviceInfo] Success!`);
 
       return res.status(200).json({ success: true, message: 'Device and IP saved successfully' });
     } catch (error: any) {
-      console.error(`[saveDeviceInfo] Error:`, error.message);
+      console.error('[saveDeviceInfo] Controller Error:', error.message);
       return res.status(500).json({ error: error.message });
     }
   }
