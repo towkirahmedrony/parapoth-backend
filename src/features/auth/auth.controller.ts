@@ -7,11 +7,17 @@ import crypto from 'crypto';
 const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
 
 const getClientIp = (req: Request): string => {
-  let ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-  if (typeof ipAddress === 'string' && ipAddress.includes(',')) {
-    return ipAddress.split(',')[0].trim();
+  const forwarded = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'];
+  
+  let ipAddress = '';
+  
+  if (Array.isArray(forwarded)) {
+    ipAddress = forwarded[0]; 
+  } else if (typeof forwarded === 'string') {
+    ipAddress = forwarded.split(',')[0].trim(); 
   }
-  return ipAddress as string;
+
+  return ipAddress || req.ip || req.socket?.remoteAddress || '';
 };
 
 export const authController = {
