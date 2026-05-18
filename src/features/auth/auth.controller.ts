@@ -9,15 +9,25 @@ const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
 const getClientIp = (req: Request): string => {
   const forwarded = req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.headers['x-forwarded-for'];
   
-  let ipAddress = '';
+  // --- IP Debugging Start ---
+  console.log('\n--- IP Debugging Start ---');
+  console.log('1. All Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('2. Forwarded Header:', forwarded);
+  console.log('3. Express req.ip:', req.ip);
+  console.log('4. Socket Remote Address:', req.socket?.remoteAddress);
   
+  let ipAddress = '';
   if (Array.isArray(forwarded)) {
     ipAddress = forwarded[0]; 
   } else if (typeof forwarded === 'string') {
     ipAddress = forwarded.split(',')[0].trim(); 
   }
 
-  return ipAddress || req.ip || req.socket?.remoteAddress || '';
+  const finalIp = ipAddress || req.ip || req.socket?.remoteAddress || '';
+  console.log('5. Final Extracted IP:', finalIp);
+  console.log('--- IP Debugging End ---\n');
+
+  return finalIp as string;
 };
 
 export const authController = {
@@ -142,6 +152,8 @@ export const authController = {
       if (!user_id) return res.status(400).json({ error: "User ID is required" });
 
       const ipAddress = getClientIp(req);
+      
+      console.log(`[saveDeviceInfo] Saving IP: "${ipAddress}" for User: ${user_id}`);
 
       await authService.saveUserDevice({
         user_id,
@@ -149,9 +161,12 @@ export const authController = {
         os_or_browser,
         ip_address: ipAddress
       });
+      
+      console.log(`[saveDeviceInfo] Success!`);
 
       return res.status(200).json({ success: true, message: 'Device and IP saved successfully' });
     } catch (error: any) {
+      console.error(`[saveDeviceInfo] Error:`, error.message);
       return res.status(500).json({ error: error.message });
     }
   }
