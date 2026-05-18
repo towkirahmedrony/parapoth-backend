@@ -6,7 +6,6 @@ import crypto from 'crypto';
 
 const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
 
-// 🚀 [FIX]: IP Address বের করার হেল্পার ফাংশন
 const getClientIp = (req: Request): string => {
   let ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
   if (typeof ipAddress === 'string' && ipAddress.includes(',')) {
@@ -130,14 +129,12 @@ export const authController = {
     }
   },
 
-  // 🚀 [NEW]: সাধারণ ইউজারদের IP এবং ডিভাইস সেভ করার জন্য নতুন মেথড
   async saveDeviceInfo(req: Request, res: Response) {
     try {
       const { user_id, device_name, os_or_browser } = req.body;
       
       if (!user_id) return res.status(400).json({ error: "User ID is required" });
 
-      // রিকোয়েস্ট থেকে ইউজারের আসল IP বের করা হচ্ছে
       const ipAddress = getClientIp(req);
 
       await authService.saveUserDevice({

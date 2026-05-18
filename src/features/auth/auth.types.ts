@@ -1,7 +1,5 @@
-// import { Database } from '../../config/supabase';
+import { Database } from '../../types/database.type';
 
-// FIXME: TS2305 এরর ফিক্স করতে সাময়িকভাবে 'any' ব্যবহার করা হয়েছে। 
-// Supabase থেকে জেনারেটেড টাইপগুলো config/supabase.ts এ ঠিকমতো এক্সপোর্ট করে এখানে আবার Database টাইপটি বসাতে হবে।
-export type Profile = any;
-export type UserRole = any;
-export type RolePermission = any;
+export type Profile = Database['public']['Tables']['profiles']['Row'];
+export type UserRole = Database['public']['Tables']['user_roles']['Row'];
+export type RolePermission = Database['public']['Tables']['role_permissions']['Row'];

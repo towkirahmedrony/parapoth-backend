@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { Profile } from './auth.types';
 import jwt from 'jsonwebtoken';
 import { ReferralService } from '../referral/referral.service';
+import crypto from 'crypto';
 
 export const authService = {
   async getProfile(userId: string): Promise<Profile> {
@@ -65,7 +66,6 @@ export const authService = {
     return (data.settings as any).two_factor_secret || null;
   },
 
-  // 🚀 [FIX]: IP Address রিসিভ ও সেভ করার ব্যবস্থা করা হলো
   async saveTrustedDevice(userId: string, deviceToken: string, ipAddress?: string): Promise<void> {
     const { error } = await supabase.from('admin_sessions').insert({ 
       admin_id: userId, 
@@ -77,20 +77,22 @@ export const authService = {
     if (error) throw new Error('Failed to save trusted device');
   },
 
-  // 🚀 [FIX]: user_devices_rows টেবিলের জন্য এক্সট্রা মেথড তৈরি করে রাখা হলো
-  // সাধারণ ইউজার লগইন হওয়ার সময় কন্ট্রোলার থেকে আইপি সহ এই ফাংশনটি কল করবেন
+  // 🚀 [FIX]: সঠিক টেবিল নেম এবং RLS বাইপাসের জন্য Admin ক্লায়েন্ট ব্যবহার করা হলো
   async saveUserDevice(payload: { user_id: string, device_name?: string, device_id?: string, fcm_token?: string, os_or_browser?: string, ip_address?: string }): Promise<void> {
-    const { error } = await supabase.from('user_devices_rows').insert([{
+    const deviceId = payload.device_id || crypto.randomUUID(); // ডাটাবেইজে device_id Required, তাই জেনারেট করা হলো
+    
+    const { error } = await supabaseAdmin.from('user_devices').insert([{
       user_id: payload.user_id,
       device_name: payload.device_name || 'Unknown',
-      device_id: payload.device_id,
+      device_id: deviceId,
       fcm_token: payload.fcm_token,
       last_active_at: new Date().toISOString(),
       is_trusted: true,
       os_or_browser: payload.os_or_browser,
       ip_address: payload.ip_address || null
     }]);
-    if (error) console.error('Failed to save user device:', error);
+
+    if (error) console.error('Failed to save user device:', error.message);
   },
 
   async isDeviceTrusted(userId: string, deviceToken: string): Promise<boolean> {
@@ -115,12 +117,12 @@ export const authService = {
   async grantSignupXP(userId: string): Promise<void> {
     const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
     const xp = (data?.value as any)?.signup_bonus || 50;
-    await supabase.rpc('update_user_progress', { p_coins: 0, p_user_id: userId, p_xp: xp });
+    await supabaseAdmin.rpc('update_user_progress', { p_coins: 0, p_user_id: userId, p_xp: xp });
   },
 
   async grantProfileCompletionXP(userId: string): Promise<void> {
     const { data } = await supabase.from('app_configs').select('value').eq('key', 'xp_rules').maybeSingle();
     const xp = (data?.value as any)?.profile_completion || 50;
-    await supabase.rpc('update_user_progress', { p_coins: 0, p_user_id: userId, p_xp: xp });
+    await supabaseAdmin.rpc('update_user_progress', { p_coins: 0, p_user_id: userId, p_xp: xp });
   }
 };

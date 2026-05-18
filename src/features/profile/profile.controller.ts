@@ -9,11 +9,11 @@ export const getMyProfile = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const updateProfile = catchAsync(async (req: Request, res: Response) => {
+  // UpdateProfileDto এর ডাটাগুলো req.body থেকে পাস হচ্ছে
   const updated = await ProfileService.updateProfile(req.user!.id, req.body);
   sendResponse(res, 200, true, 'Profile updated successfully', updated);
 });
 
-// নতুন কন্ট্রোলার মেথড: থিম আপডেট
 export const updateThemePreference = catchAsync(async (req: Request, res: Response) => {
   const { theme } = req.body;
   const updatedSettings = await ProfileService.updateThemePreference(req.user!.id, theme);
