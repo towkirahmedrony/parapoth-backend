@@ -4,49 +4,56 @@ import sendResponse from '../../lib/utils/response';
 import { ExamUserService } from './exams.user.service';
 import { incrementStreakOnExamSubmit } from '../growth/streak.service';
 
+// 🛡️ Strict Authorization Helper: রিকোয়েস্ট বডি থেকে ইউজার আইডি নেওয়া সম্পূর্ণ নিষিদ্ধ
+const getAuthUserId = (req: Request): string => {
+  const userId = (req as any).user?.id;
+  if (!userId) {
+    throw new Error('Unauthorized: Valid user session required');
+  }
+  return userId;
+};
+
 export const generateExam = catchAsync(async (req: Request, res: Response) => {
+  // অথেন্টিকেটেড ইউজারের রিকোয়েস্ট ভেরিফিকেশন
+  getAuthUserId(req);
   const result = await ExamUserService.generateExam(req.body);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Exam generated', data: result });
+  sendResponse(res, { statusCode: 200, success: true, message: 'Exam generated successfully', data: result });
 });
 
 export const getArena = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
   const limit = parseInt(req.query.limit as string) || 10;
-  // 🌟 আপডেট: query থেকে subjectSlug রিসিভ করা হলো
   const subjectSlug = req.query.subjectSlug as string | undefined; 
   
-  const result = await ExamUserService.getArenaQuestions(limit, subjectSlug);
+  const result = await ExamUserService.getArenaQuestions(userId, limit, subjectSlug);
   sendResponse(res, { statusCode: 200, success: true, message: 'Arena questions fetched', data: result });
 });
 
 export const submitHistory = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id || req.body.user_id;
+  const userId = getAuthUserId(req);
   const result = await ExamUserService.submitHistory(userId, req.body);
   
-  if (userId) {
-    await incrementStreakOnExamSubmit(userId);
-  }
-
-  sendResponse(res, { statusCode: 200, success: true, message: 'Exam history saved', data: result });
+  // 🛡️ সিকিউরিটি ফিক্স: প্র্যাকটিস হিস্ট্রি থেকে কোনো স্ট্রিক ইনক্রিমেন্ট হবে না (Abuse প্রতিরোধে)
+  sendResponse(res, { statusCode: 200, success: true, message: 'Exam practice history logged', data: result });
 });
 
 export const submitExam = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req as any).user?.id || req.body.user_id;
+  const userId = getAuthUserId(req);
   const payload = { ...req.body, user_id: userId };
   const result = await ExamUserService.submitExamResult(payload);
 
-  if (userId) {
-    await incrementStreakOnExamSubmit(userId);
-  }
+  // শুধুমাত্র অফিসিয়াল ব্যাকএন্ড ভেরিফাইড সাবমিশনেই স্ট্রিক ইনক্রিমেন্ট হবে
+  await incrementStreakOnExamSubmit(userId);
 
-  sendResponse(res, { statusCode: 200, success: true, message: 'Exam submitted', data: result });
+  sendResponse(res, { statusCode: 200, success: true, message: 'Official exam submitted and scored', data: result });
 });
 
 export const createGroupBattle = catchAsync(async (req: Request, res: Response) => {
-  const challengerId = (req as any).user?.id || req.body.user_id; 
+  const challengerId = getAuthUserId(req); 
   const { opponentId, ...examData } = req.body;
 
   if (!opponentId) {
-    throw new Error('অপোনেন্টের আইডি প্রয়োজন!');
+    throw new Error('Opponent User ID is required to challenge!');
   }
 
   const result = await ExamUserService.createGroupBattleExam(challengerId, opponentId, examData);
@@ -54,7 +61,7 @@ export const createGroupBattle = catchAsync(async (req: Request, res: Response) 
   sendResponse(res, { 
     statusCode: 201, 
     success: true, 
-    message: 'ব্যাটল এক্সাম সফলভাবে তৈরি হয়েছে', 
+    message: 'Group battle exam created successfully', 
     data: result 
   });
 });
