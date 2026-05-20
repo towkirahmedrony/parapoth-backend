@@ -42,10 +42,9 @@ export const getArena = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
- * Legacy safe history endpoint.
- * Important:
- * - This endpoint does NOT award XP/streak anymore.
- * - Real scoring must happen through /submit.
+ * Legacy endpoint.
+ * Frontend score trusted না।
+ * XP/Streak এখান থেকে দেওয়া হবে না।
  */
 export const submitHistory = catchAsync(async (req: Request, res: Response) => {
   const userId = getAuthUserId(req);
@@ -61,12 +60,11 @@ export const submitHistory = catchAsync(async (req: Request, res: Response) => {
 
 export const submitExam = catchAsync(async (req: Request, res: Response) => {
   const userId = getAuthUserId(req);
-  const payload = {
+
+  const result = await ExamUserService.submitExamResult({
     ...req.body,
     user_id: userId,
-  };
-
-  const result = await ExamUserService.submitExamResult(payload);
+  });
 
   await incrementStreakOnExamSubmit(userId);
 

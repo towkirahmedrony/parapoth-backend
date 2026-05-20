@@ -58,6 +58,17 @@ const sanitizeOptions = (options: any): any[] => {
   }));
 };
 
+const sanitizeMedia = (media: AnyObject | null | undefined) => {
+  if (!media) return null;
+
+  return {
+    id: media.id,
+    file_name: media.file_name,
+    file_type: media.file_type,
+    file_url: media.file_url,
+  };
+};
+
 const sanitizeQuestionForClient = (q: AnyObject) => ({
   id: q.id,
   subject_id: q.subject_id,
@@ -78,21 +89,15 @@ const sanitizeQuestionForClient = (q: AnyObject) => ({
   options: sanitizeOptions(q.options),
 
   media_id: q.media_id ?? null,
-  media_library: q.media_library
-    ? {
-        id: q.media_library.id,
-        url: q.media_library.url,
-        type: q.media_library.type,
-        alt_text: q.media_library.alt_text ?? null,
-      }
-    : null,
+  media_library: sanitizeMedia(q.media_library),
 
   comprehension: q.comprehension
     ? {
         id: q.comprehension.id,
-        title: q.comprehension.title,
         body: q.comprehension.body,
-        media_library: q.comprehension.media_library ?? null,
+        sequence: q.comprehension.sequence ?? null,
+        media_id: q.comprehension.media_id ?? null,
+        media_library: sanitizeMedia(q.comprehension.media_library),
       }
     : null,
 
@@ -114,21 +119,22 @@ const EXAM_QUESTION_SELECT_QUERY = `
   body,
   options,
   media_id,
-  media_library!media_id(
+  media_library!questions_media_id_fkey(
     id,
-    url,
-    type,
-    alt_text
+    file_name,
+    file_type,
+    file_url
   ),
-  comprehension:comprehensions(
+  comprehension:comprehensions!questions_comprehension_id_fkey(
     id,
-    title,
     body,
-    media_library(
+    sequence,
+    media_id,
+    media_library!comprehensions_media_id_fkey(
       id,
-      url,
-      type,
-      alt_text
+      file_name,
+      file_type,
+      file_url
     )
   )
 `;
@@ -201,7 +207,7 @@ export class ExamUserService {
     if (error) {
       console.error('Adaptive RPC Error:', error);
 
-      const fallbackQuery = supabase
+      let fallbackQuery = supabase
         .from('questions')
         .select(EXAM_QUESTION_SELECT_QUERY)
         .eq('is_active', true)
@@ -209,9 +215,11 @@ export class ExamUserService {
         .is('deleted_at', null)
         .limit(safeLimit);
 
-      const { data: fallbackData, error: fallbackError } = subjectId
-        ? await fallbackQuery.eq('subject_id', subjectId)
-        : await fallbackQuery;
+      if (subjectId) {
+        fallbackQuery = fallbackQuery.eq('subject_id', subjectId);
+      }
+
+      const { data: fallbackData, error: fallbackError } = await fallbackQuery;
 
       if (fallbackError) {
         throw new Error(fallbackError.message);
@@ -225,8 +233,7 @@ export class ExamUserService {
 
   /**
    * Legacy endpoint.
-   * Do not trust frontend score for XP/streak.
-   * This method only stores raw history safely if needed.
+   * এটা score/XP/streak এর জন্য secure source না।
    */
   static async submitHistory(userId: string, payload: SubmitHistoryDTO) {
     if (!userId) throw new Error('Unauthorized');
@@ -312,8 +319,9 @@ export class ExamUserService {
         skipped++;
         return {
           question_id: questionId,
-          selected_option_id: selectedOptionId ?? null,
+          selected_option: selectedOptionId ? String(selectedOptionId) : null,
           is_correct: null,
+          marks_awarded: 0,
           status: 'question_not_found',
         };
       }
@@ -325,8 +333,9 @@ export class ExamUserService {
         skipped++;
         return {
           question_id: questionId,
-          selected_option_id: null,
+          selected_option: null,
           is_correct: null,
+          marks_awarded: 0,
           status: 'skipped',
         };
       }
@@ -345,8 +354,9 @@ export class ExamUserService {
 
       return {
         question_id: questionId,
-        selected_option_id: selectedOptionId,
+        selected_option: String(selectedOptionId),
         is_correct: Boolean(isCorrect),
+        marks_awarded: isCorrect ? 1 : -defaultNegativeMarks,
         status: isCorrect ? 'correct' : 'wrong',
       };
     });
@@ -384,8 +394,9 @@ export class ExamUserService {
       .map((item) => ({
         exam_history_id: result.id,
         question_id: item.question_id,
-        selected_option_id: item.selected_option_id,
+        selected_option: item.selected_option,
         is_correct: item.is_correct,
+        marks_awarded: item.marks_awarded,
         created_at: new Date().toISOString(),
       }));
 
