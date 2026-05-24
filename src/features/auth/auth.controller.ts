@@ -4,40 +4,22 @@ import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 
-const generateJWT = (userId: string) => `mock_jwt_for_${userId}`;
+const generateJWT = (userId: string) => `mock_jwt_for_${userId}`; // Replace with real JWT generation in production
 
 const getClientIp = (req: Request): string => {
-  // সব সম্ভাব্য উপায়ে আইপি খোঁজা
   const forwarded = req.headers['x-forwarded-for'];
   const realIp = req.headers['x-real-ip'];
   const cfIp = req.headers['cf-connecting-ip'];
   
   let ip = '';
-  
-  if (req.ips && req.ips.length > 0) {
-    ip = req.ips[0];
-  } else if (typeof forwarded === 'string') {
-    ip = forwarded.split(',')[0].trim();
-  } else if (Array.isArray(forwarded)) {
-    ip = forwarded[0];
-  } else if (realIp) {
-    ip = realIp as string;
-  } else if (cfIp) {
-    ip = cfIp as string;
-  } else {
-    ip = req.ip || req.socket.remoteAddress || '';
-  }
+  if (req.ips && req.ips.length > 0) ip = req.ips[0];
+  else if (typeof forwarded === 'string') ip = forwarded.split(',')[0].trim();
+  else if (Array.isArray(forwarded)) ip = forwarded[0];
+  else if (realIp) ip = realIp as string;
+  else if (cfIp) ip = cfIp as string;
+  else ip = req.ip || req.socket.remoteAddress || '';
 
-  // ক্লিনআপ
   if (ip.includes('::ffff:')) ip = ip.split(':').pop() || '';
-
-  console.log('\n--- [IP LOGGING START] ---');
-  console.log('X-Forwarded-For:', forwarded);
-  console.log('req.ip:', req.ip);
-  console.log('req.ips (Trust Proxy Chain):', req.ips);
-  console.log('Extracted IP:', ip);
-  console.log('--- [IP LOGGING END] ---\n');
-
   return ip;
 };
 
@@ -71,12 +53,14 @@ export const authController = {
       const userId = (req as any).user?.id;
       const email = (req as any).user?.email || 'admin@parapoth.com';
       if (!userId) return res.status(401).json({ error: 'Unauthorized user' });
+      
       const secret = speakeasy.generateSecret({ name: `ParaPoth Admin (${email})` });
-      const otpauthUrl = secret.otpauth_url;
-      if (!otpauthUrl) throw new Error("Failed to generate OTP Auth URL");
-      const qrCodeImage = await QRCode.toDataURL(otpauthUrl);
+      if (!secret.otpauth_url) throw new Error("Failed to generate OTP Auth URL");
+      
+      const qrCodeImage = await QRCode.toDataURL(secret.otpauth_url);
       await authService.save2FASecret(userId, secret.base32);
-      return res.status(200).json({ qrCode: qrCodeImage, setupKey: secret.base32, message: "Scan this QR code" });
+      
+      return res.status(200).json({ qrCode: qrCodeImage, setupKey: secret.base32, message: "Scan this QR code in Google Authenticator" });
     } catch (error: any) {
       return res.status(500).json({ error: error.message });
     }
@@ -84,16 +68,23 @@ export const authController = {
 
   async adminLoginInit(req: Request, res: Response) {
     try {
-      const mockAdminProfile = { id: 'some-uuid', is_2fa_enabled: true }; 
+      const { userId } = req.body;
+      if (!userId) return res.status(400).json({ error: "User ID is required for login initialization" });
+
+      const adminProfile = await authService.getProfile(userId);
       const trustedDeviceToken = req.cookies?.['trusted_admin_device'];
-      if (mockAdminProfile.is_2fa_enabled) {
-        if (trustedDeviceToken && await authService.isDeviceTrusted(mockAdminProfile.id, trustedDeviceToken)) {
-          return res.status(200).json({ token: generateJWT(mockAdminProfile.id), status: 'success' });
+
+      // Check Real 2FA status from DB
+      if (adminProfile.is_2fa_enabled) {
+        if (trustedDeviceToken && await authService.isDeviceTrusted(userId, trustedDeviceToken)) {
+          return res.status(200).json({ token: generateJWT(userId), status: 'success' });
         } else {
           return res.status(200).json({ status: 'require_2fa', message: "Please enter your 2FA code." });
         }
       }
-      return res.status(200).json({ token: generateJWT(mockAdminProfile.id), status: 'success' });
+      
+      // If 2FA is not enabled, directly return success
+      return res.status(200).json({ token: generateJWT(userId), status: 'success' });
     } catch (error: any) {
       return res.status(500).json({ error: error.message });
     }
@@ -101,21 +92,26 @@ export const authController = {
 
   async verify2FA(req: Request, res: Response) {
     try {
-      const userId = (req as any).user?.id; 
-      const { token, trustDevice } = req.body;
+      const { userId, token, trustDevice } = req.body; // Using userId from body during login phase
       const ipAddress = getClientIp(req);
-      if (!userId) return res.status(401).json({ error: "User ID not found." });
+      
+      if (!userId || !token) return res.status(400).json({ error: "User ID and Token are required." });
+      
       const secret = await authService.get2FASecret(userId);
-      if (!secret) return res.status(400).json({ error: "2FA not configured." });
+      if (!secret) return res.status(400).json({ error: "2FA not configured for this account." });
+      
       const isValid = speakeasy.totp.verify({ secret, encoding: 'base32', token, window: 1 });
-      if (!isValid) return res.status(400).json({ error: "Invalid code." });
+      if (!isValid) return res.status(400).json({ error: "Invalid 2FA code." });
+      
       await authService.enable2FA(userId);
+      
       if (trustDevice) {
         const deviceToken = crypto.randomBytes(32).toString('hex');
         await authService.saveTrustedDevice(userId, deviceToken, ipAddress || 'unknown');
         res.cookie('trusted_admin_device', deviceToken, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true, secure: true, sameSite: 'strict' });
       }
-      return res.status(200).json({ status: 'success' });
+      
+      return res.status(200).json({ token: generateJWT(userId), status: 'success' });
     } catch (error: any) {
       return res.status(500).json({ error: error.message });
     }
@@ -127,19 +123,16 @@ export const authController = {
       if (!user_id) return res.status(400).json({ error: "User ID required" });
       
       const ipAddress = getClientIp(req);
-      console.log(`[SAVE_DEVICE] User: ${user_id}, IP: ${ipAddress || 'EMPTY'}`);
-
       await authService.saveUserDevice({
         user_id,
         device_name,
         os_or_browser,
         fcm_token,
-        ip_address: ipAddress || '0.0.0.0' // আইপি না পেলে ডিফল্ট ভ্যালু সেভ হবে
+        ip_address: ipAddress
       });
 
       return res.status(200).json({ success: true });
     } catch (error: any) {
-      console.error('[SAVE_DEVICE_ERROR]:', error.message);
       return res.status(500).json({ error: error.message });
     }
   }

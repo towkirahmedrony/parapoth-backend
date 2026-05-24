@@ -4,20 +4,15 @@ import { requireAuth } from '../../middlewares/requireAuth';
 
 const router = Router();
 
-// Public Routes (or initial login steps)
+// Public Routes
 router.post('/admin/login', authController.adminLoginInit);
-
-// 🚀 [NEW]: সাধারণ ইউজারদের ডিভাইস এবং আইপি সেভ করার রাউট
+router.post('/admin/verify-2fa', authController.verify2FA); // Moved to public for login flow
 router.post('/save-device', authController.saveDeviceInfo);
 
-// Protected Routes (Require Authentication via Supabase Token)
+// Protected Routes
 router.use(requireAuth);
-
-// 👈 verify-2fa এখন protected route, তাই এটি নিজে থেকেই টোকেন ভেরিফাই করে req.user এ ডেটা দিয়ে দেবে
-router.post('/admin/verify-2fa', authController.verify2FA); 
-
 router.get('/profile', authController.getProfile);
 router.get('/permissions', authController.getRoleAndPermissions);
-router.post('/2fa/setup', authController.setup2FA); // Route to generate QR code
+router.post('/2fa/setup', authController.setup2FA); 
 
 export default router;
