@@ -17,13 +17,15 @@ export const rbacGuard = (allowedRoles: string[]) => {
 
       const userId = req.user.id;
 
-      // Fetch the active role of the user from the user_roles table
+      // 🚀 আপডেট: .single() এর বদলে limit(1).maybeSingle() দেওয়া হলো যাতে একাধিক রো থাকলেও ক্র্যাশ না করে
       const { data: userRole, error } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', userId)
         .eq('is_active', true)
-        .single();
+        .order('created_at', { ascending: false }) // একাধিক রোল থাকলে লেটেস্ট রোলটি নেবে
+        .limit(1)
+        .maybeSingle();
 
       // Database error handling with specific log
       if (error) {
