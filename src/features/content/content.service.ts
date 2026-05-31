@@ -81,13 +81,13 @@ export const buildCurriculumTree = async (): Promise<CurriculumNode[]> => {
 const pickAllowedFields = (nodeType: NodeType, rawData: Record<string, any> = {}) => {
   const allowedFieldsByType: Record<NodeType, string[]> = {
     subject: [
-      'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'icon_url', 'curriculum_version', 'language',
+      'id', 'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'icon_url', 'curriculum_version', 'language',
     ],
     chapter: [
-      'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'subject_id',
+      'id', 'name_en', 'name_bn', 'slug', 'description', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'subject_id',
     ],
     topic: [
-      'name_en', 'name_bn', 'slug', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'chapter_id', 'total_questions',
+      'id', 'name_en', 'name_bn', 'slug', 'sequence', 'is_active', 'is_premium', 'curriculum_version', 'language', 'chapter_id', 'total_questions',
     ],
   };
 
@@ -128,7 +128,8 @@ export const manageCurriculumNode = async (
   const payload = pickAllowedFields(nodeType, data || {});
 
   if (action === 'insert') {
-    payload.id = generateNodeId(nodeType);
+    // 🚀 ID যদি ফ্রন্টএন্ড থেকে আসে তাহলে সেটি ব্যবহার হবে, না হলে নতুন জেনারেট হবে
+    payload.id = payload.id || generateNodeId(nodeType);
     const { data: result, error } = await supabase.from(table).insert([payload]).select().single();
     if (error) throw new Error(error.message);
     return result;
@@ -137,6 +138,10 @@ export const manageCurriculumNode = async (
   if (action === 'update') {
     if (!id) throw new Error('ID is required for update action');
     if (Object.keys(payload).length === 0) throw new Error('No valid fields provided for update');
+    
+    // আপডেটের সময় আইডি পরিবর্তন করা ঠিক নয়, তাই সেফটির জন্য আইডি বাদ দেওয়া হলো
+    delete payload.id;
+    
     const { data: result, error } = await supabase.from(table).update(payload).eq('id', id).select().single();
     if (error) throw new Error(error.message);
     return result;
