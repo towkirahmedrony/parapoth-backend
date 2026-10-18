@@ -76,6 +76,27 @@ export const submitExam = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
+export const getExamResult = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamUserService.getExamResult(userId, req.params.id);
+
+  if (!result) {
+    res.status(404).json({
+      success: false,
+      message: 'Exam result not found',
+      data: null,
+    });
+    return;
+  }
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Exam result fetched',
+    data: result,
+  });
+});
+
 export const createGroupBattle = catchAsync(async (req: Request, res: Response) => {
   const challengerId = getAuthUserId(req);
   const { opponentId, ...examData } = req.body;
