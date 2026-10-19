@@ -8,38 +8,45 @@ import {
   getLevels, saveLevels,
   getXpRules, saveXpRules
 } from './app-builder.controller';
+import { requireAuth } from '../../middlewares/requireAuth';
+import { rbacGuard } from '../../middlewares/rbacGuard';
 
 const router = Router();
 
-// --- General Configs Route ---
-router.get('/configs', getAllConfigs);
+const adminGuard = [requireAuth, rbacGuard(['admin', 'super_admin'])];
 
-// --- Home Grids Routes ---
+// --- Private Configurations (admin only) ---
+// Full app_configs dump is never public.
+router.get('/configs', adminGuard, getAllConfigs);
+
+// --- Public, allowlisted read models ---
 router.get('/home-grids', getHomeGrids);
-router.post('/home-grids', saveHomeGrid);
-router.patch('/home-grids/reorder', reorderHomeGrids);
-router.delete('/home-grids/:id', deleteHomeGrid);
-
-// --- Daily Quote Routes ---
-router.get('/configs/daily_quote', getDailyQuote); 
-router.post('/configs/daily_quote', saveDailyQuote);
-
-// --- Theme Config Routes ---
+router.get('/configs/daily_quote', getDailyQuote);
 router.get('/theme-config', getThemeConfig);
-router.post('/configs/theme_config', saveThemeConfig);
-
-// --- Banners Routes ---
 router.get('/banners', getBanners);
-router.post('/banners', createBanner);
-router.put('/banners/:id', updateBanner);
-router.delete('/banners/:id', deleteBanner);
-
-// --- Leagues & Levels Routes ---
 router.get('/levels', getLevels);
-router.put('/levels', saveLevels);
-
-// --- XP Rules Routes ---
 router.get('/configs/xp_rules', getXpRules);
-router.put('/xp-rules', saveXpRules);
+
+// --- Home Grids (admin only) ---
+router.post('/home-grids', adminGuard, saveHomeGrid);
+router.patch('/home-grids/reorder', adminGuard, reorderHomeGrids);
+router.delete('/home-grids/:id', adminGuard, deleteHomeGrid);
+
+// --- Daily Quote (admin only writes) ---
+router.post('/configs/daily_quote', adminGuard, saveDailyQuote);
+
+// --- Theme Config (admin only writes) ---
+router.post('/configs/theme_config', adminGuard, saveThemeConfig);
+
+// --- Banners (admin only writes) ---
+router.post('/banners', adminGuard, createBanner);
+router.put('/banners/:id', adminGuard, updateBanner);
+router.delete('/banners/:id', adminGuard, deleteBanner);
+
+// --- Leagues & Levels (admin only writes) ---
+router.put('/levels', adminGuard, saveLevels);
+
+// --- XP Rules (admin only writes) ---
+router.put('/xp-rules', adminGuard, saveXpRules);
 
 export default router;

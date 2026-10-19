@@ -38,14 +38,35 @@ export const reorderHomeGrids = async (reorderPayload: { id: string, serial_orde
 // ==========================================
 // Global Configs & Remote Controls
 // ==========================================
+// Only these configuration records may be read without an admin token.
+const PUBLIC_SYSTEM_CONFIG_KEYS = [
+  'global_settings',
+  'global_notice',
+  'theme_config',
+  'daily_quote',
+  'xp_rules',
+] as const;
+
 export const getGlobalConfigs = async () => {
-  const { data, error } = await supabase.from('app_configs').select('*').in('key', ['global_settings', 'global_notice', 'theme_config', 'daily_quote', 'xp_rules']);
+  const { data, error } = await supabase
+    .from('app_configs')
+    .select('key, value')
+    .in('key', [...PUBLIC_SYSTEM_CONFIG_KEYS]);
   if (error) throw error;
   return data;
 };
 
 export const getAppConfigByKey = async (key: string) => {
-  const { data, error } = await supabase.from('app_configs').select('*').eq('key', key).maybeSingle();
+  if (!(PUBLIC_SYSTEM_CONFIG_KEYS as readonly string[]).includes(key)) {
+    // Fail closed for private/administrative configuration keys.
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('app_configs')
+    .select('key, value')
+    .eq('key', key)
+    .maybeSingle();
   if (error) throw error;
   return data;
 };

@@ -1,5 +1,9 @@
 import { supabase } from '../../config/supabase';
-import { UpdateAdminProfileDTO } from './profile.admin.types';
+import {
+  buildAdminProfileUpdatePayload,
+  parseThemePreference,
+  ProfileValidationError,
+} from './profile.validation';
 
 export const getAdminIdentity = async (adminId: string) => {
   const { data: profile, error: profileError } = await supabase
@@ -26,10 +30,16 @@ export const getAdminIdentity = async (adminId: string) => {
   };
 };
 
-export const updateAdminIdentity = async (adminId: string, data: UpdateAdminProfileDTO) => {
+export const updateAdminIdentity = async (adminId: string, data: unknown) => {
+  const safeUpdate = buildAdminProfileUpdatePayload(data);
+
+  if (Object.keys(safeUpdate).length === 0) {
+    throw new ProfileValidationError('No editable profile fields supplied');
+  }
+
   const { data: updatedProfile, error } = await supabase
     .from('profiles')
-    .update(data)
+    .update(safeUpdate)
     .eq('id', adminId)
     .select()
     .single();
@@ -39,11 +49,14 @@ export const updateAdminIdentity = async (adminId: string, data: UpdateAdminProf
 };
 
 // নতুন মেথড: এডমিনের থিম সেটিংস আপডেট করার জন্য
-export const updateAdminThemePreference = async (adminId: string, theme: string) => {
+export const updateAdminThemePreference = async (adminId: string, theme: unknown) => {
+  const safeTheme = parseThemePreference(theme);
+
   const { data: profile } = await supabase.from('profiles').select('settings').eq('id', adminId).single();
   
   const currentSettings = (profile?.settings as Record<string, any>) || {};
-  const updatedSettings = { ...currentSettings, theme };
+  const updatedSettings: Record<string, any> = { ...currentSettings, theme: safeTheme };
+  delete updatedSettings.two_factor_secret;
 
   const { data, error } = await supabase
     .from('profiles')

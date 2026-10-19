@@ -13,25 +13,35 @@ type Row = Record<string, any>;
 type FakeState = {
   questions: Row[];
   examPapers: Row[];
+  examPaperQuestions: Row[];
   history: Row[];
   insertedHistory: Row | null;
   insertedDetails: Row[];
+  insertedRows: Record<string, Row[]>;
   tableCalls: string[];
+  rpcQuestions: Row[];
 };
 
 const state: FakeState = {
   questions: [],
   examPapers: [],
+  examPaperQuestions: [],
   history: [],
   insertedHistory: null,
   insertedDetails: [],
+  insertedRows: {},
   tableCalls: [],
+  rpcQuestions: [],
+};
+
+const recordInsert = (table: string, rows: Row[]) => {
+  state.insertedRows[table] = state.insertedRows[table] || [];
+  state.insertedRows[table].push(...rows);
 };
 
 const createBuilder = (table: string) => {
   const filters: Record<string, any> = {};
   let inserted: Row[] | null = null;
-  let rpcResult: Row | null = null;
 
   const resolveQuery = (mode: 'many' | 'single') => {
     state.tableCalls.push(`${table}:${mode}`);
@@ -41,9 +51,19 @@ const createBuilder = (table: string) => {
       return { data: mode === 'single' ? paper ?? null : paper ? [paper] : [], error: null };
     }
 
+    if (table === 'exam_paper_questions') {
+      const rows = state.examPaperQuestions.filter(
+        (item) => String(item.exam_id) === String(filters.exam_id)
+      );
+      return { data: rows, error: null };
+    }
+
     if (table === 'questions') {
       const ids: string[] = Array.isArray(filters.id) ? filters.id.map(String) : [];
-      const rows = state.questions.filter((item) => ids.includes(String(item.id)));
+      const rows =
+        ids.length > 0
+          ? state.questions.filter((item) => ids.includes(String(item.id)))
+          : state.questions;
       return { data: rows, error: null };
     }
 
@@ -95,12 +115,13 @@ const createBuilder = (table: string) => {
     limit: () => builder,
     insert: (rows: Row[]) => {
       inserted = rows;
+      recordInsert(table, rows);
       return builder;
     },
     maybeSingle: async () => resolveQuery('single'),
     single: async () => resolveQuery('single'),
     then: (onFulfilled: any, onRejected: any) =>
-      Promise.resolve(resolveQuery(inserted ? 'many' : 'many')).then(onFulfilled, onRejected),
+      Promise.resolve(resolveQuery('many')).then(onFulfilled, onRejected),
   };
 
   return builder;
@@ -108,7 +129,7 @@ const createBuilder = (table: string) => {
 
 const fakeSupabase = {
   from: (table: string) => createBuilder(table),
-  rpc: async (_name: string, _args: Row) => ({ data: null, error: null }),
+  rpc: async (_name: string, _args: Row) => ({ data: state.rpcQuestions, error: null }),
 };
 
 const require = createRequire(__filename);
@@ -149,7 +170,21 @@ const questions: Row[] = [
     ],
     explanation: null,
   },
+  {
+    id: uuid('3'),
+    type: 'MCQ',
+    difficulty_level: 'easy',
+    body: { text_bn: 'প্রশ্ন তিন', text_en: 'Question three', image_url: null },
+    options: [
+      { id: uuid('e'), text_bn: 'ঙ', text_en: 'E', isCorrect: true },
+      { id: uuid('f'), text_bn: 'চ', text_en: 'F', isCorrect: false },
+    ],
+    explanation: 'গোপন ব্যাখ্যা',
+  },
 ];
+
+const hasCorrectFlag = (options: Row[]) =>
+  options.some((option) => 'isCorrect' in option || 'is_correct' in option);
 
 beforeEach(() => {
   state.questions = questions.map((question) => ({ ...question }));
@@ -158,16 +193,76 @@ beforeEach(() => {
       id: 'exam-1',
       default_negative_marks: 0.25,
       total_marks: 2,
-      result_publish_time: null,
+      result_publish_time: '2020-01-01T00:00:00.000Z',
+      is_published: true,
     },
+    {
+      id: 'exam-2',
+      default_negative_marks: 0.25,
+      total_marks: 1,
+      result_publish_time: '2099-01-01T00:00:00.000Z',
+      is_published: true,
+    },
+    {
+      id: 'exam-3',
+      default_negative_marks: 0.25,
+      total_marks: 1,
+      result_publish_time: null,
+      is_published: true,
+    },
+    {
+      id: 'exam-unpublished',
+      default_negative_marks: 0.25,
+      total_marks: 1,
+      result_publish_time: '2020-01-01T00:00:00.000Z',
+      is_published: false,
+    },
+    {
+      id: 'exam-empty',
+      default_negative_marks: 0.25,
+      total_marks: 1,
+      result_publish_time: '2020-01-01T00:00:00.000Z',
+      is_published: true,
+    },
+  ];
+  state.examPaperQuestions = [
+    { id: 'eq-1', exam_id: 'exam-1', question_id: uuid('1'), sequence: 1 },
+    { id: 'eq-2', exam_id: 'exam-1', question_id: uuid('2'), sequence: 2 },
+    { id: 'eq-3', exam_id: 'exam-2', question_id: uuid('1'), sequence: 1 },
+    { id: 'eq-4', exam_id: 'exam-3', question_id: uuid('1'), sequence: 1 },
+    { id: 'eq-5', exam_id: 'exam-unpublished', question_id: uuid('1'), sequence: 1 },
   ];
   state.history = [];
   state.insertedHistory = null;
   state.insertedDetails = [];
+  state.insertedRows = {};
   state.tableCalls = [];
+  state.rpcQuestions = questions.map((question) => ({ ...question }));
 });
 
-test('submit stores a reviewable question snapshot and grades UUID options correctly', async () => {
+test('arena question retrieval never exposes correct flags or explanations', async () => {
+  const arena = await ExamUserService.getArenaQuestions('user-1', 10);
+
+  assert.equal(arena.length, 3);
+  arena.forEach((question: Row) => {
+    assert.equal('explanation' in question, false);
+    assert.equal(hasCorrectFlag(question.options), false);
+  });
+});
+
+test('generateExam sanitizes correct flags and explanations', async () => {
+  const generated = await ExamUserService.generateExam('user-1', {
+    topics: ['topic-1'],
+    limit: 10,
+  });
+
+  generated.forEach((question: Row) => {
+    assert.equal('explanation' in question, false);
+    assert.equal(hasCorrectFlag(question.options), false);
+  });
+});
+
+test('submit stores a reviewable snapshot and grades UUID options correctly', async () => {
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
     user_id: 'user-1',
@@ -216,6 +311,7 @@ test('wrong answers are graded against the option identity, not numeric coercion
 
 test('result review is owner-scoped and resolves question text for stored attempts', async () => {
   const submitResult = await ExamUserService.submitExamResult({
+    exam_id: 'exam-1',
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('b') },
     question_ids: [uuid('1')],
@@ -230,21 +326,13 @@ test('result review is owner-scoped and resolves question text for stored attemp
   assert.equal(ownResult.details_json.questions.length, 1);
   assert.equal(ownResult.details_json.questions[0].body.text_bn, 'প্রশ্ন এক');
   assert.equal(ownResult.details_json.details[0].selected_option_text, 'খ');
+  assert.equal(ownResult.details_json.details[0].correct_option_text, 'খ');
 
   const foreignResult = await ExamUserService.getExamResult('user-2', submitResult.id);
   assert.equal(foreignResult, null);
 });
 
 test('answer disclosure stays hidden before a scheduled result publish time', async () => {
-  state.examPapers = [
-    {
-      id: 'exam-2',
-      default_negative_marks: 0.25,
-      total_marks: 1,
-      result_publish_time: '2099-01-01T00:00:00.000Z',
-    },
-  ];
-
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-2',
     user_id: 'user-1',
@@ -254,7 +342,198 @@ test('answer disclosure stays hidden before a scheduled result publish time', as
   });
 
   assert.equal(result.details_json.correct_answers_revealed, false);
-  assert.equal(result.details_json.questions[0].options.some((option: Row) => 'isCorrect' in option), false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
   assert.equal(result.details_json.questions[0].explanation, null);
   assert.equal('correct_option_text' in result.details_json.details[0], false);
+});
+
+test('a missing publish time fails closed', async () => {
+  const result = await ExamUserService.submitExamResult({
+    exam_id: 'exam-3',
+    user_id: 'user-1',
+    answers: { [uuid('1')]: uuid('b') },
+    question_ids: [uuid('1')],
+    time_taken: 10,
+  });
+
+  assert.equal(result.details_json.correct_answers_revealed, false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
+});
+
+test('omitting exam_id never enables answer disclosure', async () => {
+  const result = await ExamUserService.submitExamResult({
+    user_id: 'user-1',
+    answers: { [uuid('1')]: uuid('b') },
+    question_ids: [uuid('1')],
+    time_taken: 10,
+  });
+
+  assert.equal(result.exam_id, null);
+  assert.equal(result.details_json.correct_answers_revealed, false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
+  assert.equal(result.details_json.questions[0].explanation, null);
+  assert.equal('correct_option_id' in result.details_json.details[0], false);
+});
+
+test('submitting question ids without answers does not reveal answer keys', async () => {
+  const result = await ExamUserService.submitExamResult({
+    exam_id: 'exam-1',
+    user_id: 'user-1',
+    question_ids: [uuid('1')],
+    time_taken: 10,
+  });
+
+  assert.equal(result.correct_count, 0);
+  assert.equal(result.wrong_count, 0);
+  assert.equal(result.skipped_count, 1);
+  assert.equal(result.details_json.details[0].status, 'skipped');
+  assert.equal(result.details_json.correct_answers_revealed, false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
+  assert.equal(result.details_json.questions[0].explanation, null);
+  assert.equal('correct_option_id' in result.details_json.details[0], false);
+  assert.equal('correct_option_text' in result.details_json.details[0], false);
+});
+
+test('omitting exam_id with question ids but no answers reveals nothing protected', async () => {
+  const result = await ExamUserService.submitExamResult({
+    user_id: 'user-1',
+    question_ids: [uuid('1')],
+    time_taken: 10,
+  });
+
+  assert.equal(result.details_json.correct_answers_revealed, false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
+  assert.equal(result.details_json.questions[0].explanation, null);
+  assert.equal('correct_option_id' in result.details_json.details[0], false);
+});
+
+test('an unknown exam id is rejected and no result is written', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-does-not-exist',
+      user_id: 'user-1',
+      question_ids: [uuid('1')],
+      time_taken: 10,
+    }),
+    /Exam not found/
+  );
+
+  assert.equal(state.insertedRows.exam_history, undefined);
+});
+
+test('an unpublished exam is rejected and no result is written', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-unpublished',
+      user_id: 'user-1',
+      question_ids: [uuid('1')],
+      time_taken: 10,
+    }),
+    /Exam is not available/
+  );
+
+  assert.equal(state.insertedRows.exam_history, undefined);
+});
+
+test('questions from another exam are rejected before any write', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-1',
+      user_id: 'user-1',
+      answers: { [uuid('3')]: uuid('e') },
+      question_ids: [uuid('3')],
+      time_taken: 10,
+    }),
+    /does not belong to this exam/
+  );
+
+  assert.equal(state.insertedRows.exam_history, undefined);
+});
+
+test('an exam without an authoritative question set fails closed', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-empty',
+      user_id: 'user-1',
+      question_ids: [uuid('1')],
+      time_taken: 10,
+    }),
+    /question set is not configured/
+  );
+
+  assert.equal(state.insertedRows.exam_history, undefined);
+});
+
+test('legacy stored snapshots cannot leak answer keys before results publish', async () => {
+  state.history = [
+    {
+      id: 'legacy-1',
+      user_id: 'user-1',
+      exam_id: 'exam-2',
+      score: 0,
+      total_marks: 1,
+      correct_count: 0,
+      wrong_count: 1,
+      skipped_count: 0,
+      time_taken: 10,
+      created_at: '2026-10-18T12:00:00.000Z',
+      details_json: {
+        answers: { [uuid('1')]: uuid('a') },
+        details: [
+          {
+            question_id: uuid('1'),
+            selected_option: uuid('a'),
+            selected_option_text: 'ক',
+            is_correct: false,
+            marks_awarded: -0.25,
+            status: 'wrong',
+            correct_option_id: uuid('b'),
+            correct_option_text: 'খ',
+            debug: { answer: uuid('b') },
+          },
+        ],
+        questions: [
+          {
+            id: uuid('1'),
+            body: { text_bn: 'প্রশ্ন এক', text_en: 'Question one', image_url: null },
+            options: [
+              { id: uuid('a'), text_bn: 'ক', isCorrect: false },
+              { id: uuid('b'), text_bn: 'খ', isCorrect: true },
+            ],
+            explanation: 'ব্যাখ্যা এক',
+            answer_key: uuid('b'),
+          },
+        ],
+        correct_answers_revealed: true,
+      },
+    },
+  ];
+
+  const result = await ExamUserService.getExamResult('user-1', 'legacy-1');
+  assert.ok(result);
+  assert.equal(result.details_json.correct_answers_revealed, false);
+  assert.equal(hasCorrectFlag(result.details_json.questions[0].options), false);
+  assert.equal(result.details_json.questions[0].explanation, null);
+  assert.equal('answer_key' in result.details_json.questions[0], false);
+  assert.equal('correct_option_id' in result.details_json.details[0], false);
+  assert.equal('correct_option_text' in result.details_json.details[0], false);
+  assert.equal('debug' in result.details_json.details[0], false);
+});
+
+test('review uses the exam question order and resolves option text', async () => {
+  const submitResult = await ExamUserService.submitExamResult({
+    exam_id: 'exam-1',
+    user_id: 'user-1',
+    answers: {
+      [uuid('2')]: uuid('c'),
+      [uuid('1')]: uuid('b'),
+    },
+    question_ids: [uuid('2'), uuid('1')],
+    time_taken: 15,
+  });
+
+  assert.deepEqual(
+    submitResult.details_json.questions.map((question: Row) => question.id),
+    [uuid('1'), uuid('2')]
+  );
 });

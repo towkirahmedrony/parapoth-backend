@@ -1,4 +1,5 @@
 import { supabaseAdmin } from '../../config/supabaseAdmin';
+import type { PublicConfigKey } from './app-builder.validation';
 
 export const AppBuilderService = {
   // ================== APP CONFIGS (Generic) ==================
@@ -20,6 +21,22 @@ export const AppBuilderService = {
     
     if (error && error.code !== 'PGRST116') throw error; // Ignore Not Found error
     return data || { value: null };
+  },
+
+  /**
+   * Public read model: only an allowlisted key and its value are returned, so
+   * maintenance fields, internal metadata and private records stay admin-only.
+   */
+  async getPublicConfig(key: PublicConfigKey) {
+    const { data, error } = await supabaseAdmin
+      .from('app_configs')
+      .select('key, value')
+      .eq('key', key)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    return data || { key, value: null };
   },
 
   async saveConfig(key: string, value: any) {
@@ -132,10 +149,11 @@ export const AppBuilderService = {
   },
 
   async updateLevels(levels: any[]) {
-    // Format data to ensure empty strings for IDs are removed so DB generates them for new inserts
-    const formattedLevels = levels.map(level => {
-      if (!level.id) delete level.id;
-      return level;
+    // Copy instead of mutating the caller payload; empty ids are omitted so the
+    // database can generate them for new rows.
+    const formattedLevels = levels.map((level) => {
+      const { id, ...rest } = level;
+      return id ? { id, ...rest } : rest;
     });
 
     const { data, error } = await supabaseAdmin

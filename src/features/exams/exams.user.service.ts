@@ -217,7 +217,12 @@ const parseDetailsJson = (raw: unknown): AnyObject => {
   return typeof raw === 'object' ? (raw as AnyObject) : {};
 };
 
-const enrichDetailWithOptionText = (
+/**
+ * Explicit allowlist for a single student-facing answer detail. Historical
+ * details_json rows may contain extra fields (including answer-key data) from
+ * older deployments, so we never spread a stored detail into a response.
+ */
+const sanitizeDetailForClient = (
   detail: AnyObject,
   question: AnyObject | undefined,
   includeCorrectAnswers: boolean
@@ -226,22 +231,83 @@ const enrichDetailWithOptionText = (
   const selectedOption = findOptionById(options, detail?.selected_option);
   const correctOption = options.find((option) => isOptionCorrect(option)) ?? null;
 
-  const enriched: AnyObject = {
-    ...detail,
-    selected_option_text: detail?.selected_option_text ?? optionDisplayText(selectedOption),
+  const sanitized: AnyObject = {
+    question_id: normalizeId(detail?.question_id),
+    selected_option: detail?.selected_option ?? null,
+    selected_option_text:
+      detail?.selected_option_text ?? optionDisplayText(selectedOption),
+    is_correct: typeof detail?.is_correct === 'boolean' ? detail.is_correct : null,
+    marks_awarded: typeof detail?.marks_awarded === 'number' ? detail.marks_awarded : 0,
+    status: typeof detail?.status === 'string' ? detail.status : 'unknown',
   };
 
-  if (includeCorrectAnswers) {
-    enriched.correct_option_id = detail?.correct_option_id ?? (correctOption ? normalizeOptionId(correctOption.id) : null);
-    enriched.correct_option_text =
-      detail?.correct_option_text ?? optionDisplayText(correctOption);
-  } else {
-    delete enriched.correct_option_id;
-    delete enriched.correct_option_text;
+  if (typeof detail?.time_spent === 'number') {
+    sanitized.time_spent = detail.time_spent;
   }
 
-  return enriched;
+  if (includeCorrectAnswers) {
+    sanitized.correct_option_id =
+      detail?.correct_option_id ?? (correctOption ? normalizeOptionId(correctOption.id) : null);
+    sanitized.correct_option_text =
+      detail?.correct_option_text ?? optionDisplayText(correctOption);
+  }
+
+  return sanitized;
 };
+
+/**
+ * Stored question snapshots are treated as untrusted legacy data. Rebuild the
+ * student-facing shape from the allowlisted fields instead of returning the
+ * stored object verbatim.
+ */
+const sanitizeStoredQuestionSnapshot = (
+  question: AnyObject,
+  includeCorrectAnswers: boolean
+) => {
+  const sanitized = sanitizeQuestionForClient(question, { includeCorrectAnswers });
+
+  return {
+    ...sanitized,
+    explanation: includeCorrectAnswers ? normalizeExplanation(question?.explanation) : null,
+  };
+};
+
+const sanitizeAnswerMap = (
+  answers: Record<string, unknown>,
+  allowedQuestionIds: Set<string>
+): Record<string, string | null> => {
+  const sanitized: Record<string, string | null> = {};
+
+  Object.entries(answers || {}).forEach(([questionId, value]) => {
+    const normalizedQuestionId = normalizeId(questionId);
+
+    if (!normalizedQuestionId || !allowedQuestionIds.has(normalizedQuestionId)) return;
+    if (value !== null && typeof value === 'object') return;
+
+    const normalizedValue = isEmptyAnswer(value) ? null : String(value).trim();
+    sanitized[normalizedQuestionId] = normalizedValue;
+  });
+
+  return sanitized;
+};
+
+const buildStudentFacingDetailsJson = (
+  detailsJson: AnyObject,
+  payload: {
+    answers: Record<string, string | null>;
+    details: AnyObject[];
+    questions: AnyObject[];
+    includeCorrectAnswers: boolean;
+    bookmarkedIds?: unknown;
+  }
+) => ({
+  session_id: detailsJson?.session_id ?? null,
+  answers: payload.answers,
+  details: payload.details,
+  questions: payload.questions,
+  correct_answers_revealed: payload.includeCorrectAnswers,
+  bookmarked_ids: Array.isArray(payload.bookmarkedIds) ? payload.bookmarkedIds : [],
+});
 
 const loadQuestionSnapshotMap = async (
   questionIds: string[]
@@ -275,6 +341,25 @@ const loadResultPublishTime = async (examId: string | null): Promise<string | nu
   if (error) throw new Error(error.message);
 
   return data?.result_publish_time ?? null;
+};
+
+/**
+ * Returns the authoritative question set for an exam. This relationship is the
+ * only source of truth for which question ids may be graded or snapshotted.
+ */
+const loadExamQuestionIds = async (examId: string): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('exam_paper_questions')
+    .select('question_id, sequence')
+    .eq('exam_id', examId);
+
+  if (error) throw new Error(error.message);
+
+  return (data || [])
+    .slice()
+    .sort((a: AnyObject, b: AnyObject) => Number(a.sequence ?? 0) - Number(b.sequence ?? 0))
+    .map((row: AnyObject) => normalizeId(row.question_id))
+    .filter(Boolean);
 };
 
 export class ExamUserService {
@@ -392,30 +477,64 @@ export class ExamUserService {
 
     if (!user_id) throw new Error('Unauthorized');
 
-    const answers = payload.answers || {};
-    const questionIds = buildQuestionIds(payload.question_ids, answers);
+    const normalizedExamId = exam_id ? normalizeId(exam_id) : null;
+    const answers =
+      payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers)
+        ? payload.answers
+        : {};
 
-    if (questionIds.length === 0) {
+    const requestedQuestionIds = buildQuestionIds(payload.question_ids, answers);
+
+    if (requestedQuestionIds.length === 0) {
       throw new Error('No questions submitted');
     }
 
     let defaultNegativeMarks = 0.25;
     let examTotalMarks: number | null = null;
     let resultPublishTime: string | null = null;
+    let authoritativeQuestionIds: string[] | null = null;
 
-    if (exam_id) {
+    if (normalizedExamId) {
       const { data: examData, error: examError } = await supabase
         .from('exam_papers')
-        .select('id, default_negative_marks, total_marks, result_publish_time')
-        .eq('id', exam_id)
+        .select('id, default_negative_marks, total_marks, result_publish_time, is_published')
+        .eq('id', normalizedExamId)
         .maybeSingle();
 
       if (examError) throw new Error(examError.message);
       if (!examData) throw new Error('Exam not found');
+      if (examData.is_published !== true) throw new Error('Exam is not available');
 
       defaultNegativeMarks = Number(examData.default_negative_marks ?? 0.25);
       examTotalMarks = Number(examData.total_marks ?? 0);
       resultPublishTime = examData.result_publish_time ?? null;
+
+      authoritativeQuestionIds = await loadExamQuestionIds(normalizedExamId);
+
+      if (authoritativeQuestionIds.length === 0) {
+        throw new Error('Exam question set is not configured');
+      }
+
+      const allowedQuestionIds = new Set(authoritativeQuestionIds);
+      const unauthorizedQuestionIds = requestedQuestionIds.filter(
+        (questionId) => !allowedQuestionIds.has(questionId)
+      );
+
+      if (unauthorizedQuestionIds.length > 0) {
+        throw new Error('Submitted question does not belong to this exam');
+      }
+    }
+
+    // Practice attempts without an exam paper may only reference published
+    // questions, and never disclose the answer key (see the gate below).
+    const questionIds = authoritativeQuestionIds
+      ? authoritativeQuestionIds.filter((questionId) =>
+          requestedQuestionIds.includes(questionId)
+        )
+      : requestedQuestionIds;
+
+    if (questionIds.length === 0) {
+      throw new Error('No questions submitted');
     }
 
     const { data: questions, error: questionsError } = await supabase
@@ -434,9 +553,17 @@ export class ExamUserService {
     });
 
     const includeCorrectAnswers = isAnswerDisclosureAllowed(
-      exam_id ? normalizeId(exam_id) : null,
+      normalizedExamId,
       resultPublishTime
     );
+
+    // Questions without a submitted answer never reveal their correct option,
+    // even when the exam policy permits review. This prevents a caller from
+    // harvesting the key by sending bare question ids.
+    const answeredQuestionIds = new Set(
+      questionIds.filter((questionId) => !isEmptyAnswer(answers[questionId]))
+    );
+    const revealKeys = includeCorrectAnswers && answeredQuestionIds.size > 0;
 
     let correct = 0;
     let wrong = 0;
@@ -450,30 +577,37 @@ export class ExamUserService {
 
       if (!q) {
         skipped++;
-        return {
-          question_id: questionId,
-          selected_option: selectedId,
-          selected_option_text: null,
-          is_correct: null,
-          marks_awarded: 0,
-          status: 'question_not_found',
-        };
+        return sanitizeDetailForClient(
+          {
+            question_id: questionId,
+            selected_option: selectedId,
+            selected_option_text: null,
+            is_correct: null,
+            marks_awarded: 0,
+            status: 'question_not_found',
+          },
+          undefined,
+          false
+        );
       }
 
       const optionsArray: AnyObject[] = Array.isArray(q.options) ? q.options : [];
       const selectedOption = findOptionById(optionsArray, selectedId);
-      const correctOption = optionsArray.find((option) => isOptionCorrect(option)) ?? null;
 
       if (!selectedId) {
         skipped++;
-        return {
-          question_id: questionId,
-          selected_option: null,
-          selected_option_text: null,
-          is_correct: null,
-          marks_awarded: 0,
-          status: 'skipped',
-        };
+        return sanitizeDetailForClient(
+          {
+            question_id: questionId,
+            selected_option: null,
+            selected_option_text: null,
+            is_correct: null,
+            marks_awarded: 0,
+            status: 'skipped',
+          },
+          q,
+          false
+        );
       }
 
       const isCorrect = isAnswerCorrect(optionsArray, selectedId);
@@ -486,33 +620,49 @@ export class ExamUserService {
         totalScore -= defaultNegativeMarks;
       }
 
-      const detail: AnyObject = {
-        question_id: questionId,
-        selected_option: selectedId,
-        selected_option_text: optionDisplayText(selectedOption),
-        is_correct: isCorrect,
-        marks_awarded: isCorrect ? 1 : -defaultNegativeMarks,
-        status: isCorrect ? 'correct' : 'wrong',
-      };
-
-      if (includeCorrectAnswers) {
-        detail.correct_option_id = correctOption ? normalizeOptionId(correctOption.id) : null;
-        detail.correct_option_text = optionDisplayText(correctOption);
-      }
-
-      return detail;
+      return sanitizeDetailForClient(
+        {
+          question_id: questionId,
+          selected_option: selectedId,
+          selected_option_text: optionDisplayText(selectedOption),
+          is_correct: isCorrect,
+          marks_awarded: isCorrect ? 1 : -defaultNegativeMarks,
+          status: isCorrect ? 'correct' : 'wrong',
+        },
+        q,
+        revealKeys
+      );
     });
 
     const questionSnapshots = questionIds
-      .map((questionId) => questionMap.get(questionId))
-      .filter((question): question is AnyObject => Boolean(question))
-      .map((question) => buildQuestionSnapshot(question, includeCorrectAnswers));
+      .map((questionId) => ({ questionId, question: questionMap.get(questionId) }))
+      .filter((entry): entry is { questionId: string; question: AnyObject } =>
+        Boolean(entry.question)
+      )
+      .map(({ questionId, question }) =>
+        buildQuestionSnapshot(question, revealKeys && answeredQuestionIds.has(questionId))
+      );
+
+    const sanitizedAnswers = sanitizeAnswerMap(
+      answers as Record<string, unknown>,
+      new Set(questionIds)
+    );
 
     const totalQuestions = questionIds.length;
     const finalScore = Math.max(0, Number(totalScore.toFixed(2)));
 
+    const detailsJson = buildStudentFacingDetailsJson(
+      { session_id: session_id || null },
+      {
+        answers: sanitizedAnswers,
+        details,
+        questions: questionSnapshots,
+        includeCorrectAnswers: revealKeys,
+      }
+    );
+
     const resultPayload = {
-      exam_id: exam_id || null,
+      exam_id: normalizedExamId,
       user_id,
       score: finalScore,
       total_marks: examTotalMarks || totalQuestions,
@@ -520,13 +670,7 @@ export class ExamUserService {
       wrong_count: wrong,
       skipped_count: skipped,
       time_taken: Number(time_taken || 0),
-      details_json: {
-        session_id: session_id || null,
-        answers,
-        details,
-        questions: questionSnapshots,
-        correct_answers_revealed: includeCorrectAnswers,
-      },
+      details_json: detailsJson,
       submitted_at: new Date().toISOString(),
     };
 
@@ -537,6 +681,10 @@ export class ExamUserService {
       .single();
 
     if (submitError) throw new Error(submitError.message);
+
+    if (!result?.id) {
+      throw new Error('Failed to persist exam result');
+    }
 
     const detailRows = details
       .filter((item) => item.status !== 'question_not_found')
@@ -571,8 +719,21 @@ export class ExamUserService {
       console.error('Update user progress error:', progressError);
     }
 
+    // Explicit response DTO: never spread the database row (which may contain
+    // grading-only fields in future schema versions).
     return {
-      ...result,
+      id: result.id,
+      exam_id: result.exam_id ?? normalizedExamId,
+      user_id: result.user_id ?? user_id,
+      score: Number(result.score ?? finalScore),
+      total_marks: Number(result.total_marks ?? (examTotalMarks || totalQuestions)),
+      correct_count: Number(result.correct_count ?? correct),
+      wrong_count: Number(result.wrong_count ?? wrong),
+      skipped_count: Number(result.skipped_count ?? skipped),
+      time_taken: Number(result.time_taken ?? time_taken ?? 0),
+      submitted_at: result.submitted_at ?? null,
+      created_at: result.created_at ?? null,
+      details_json: detailsJson,
       earned_xp: earnedXP,
       computed_result: {
         score: finalScore,
@@ -615,7 +776,7 @@ export class ExamUserService {
       ? detailsJson.details
       : [];
 
-    const answers: Record<string, unknown> =
+    const storedAnswers =
       detailsJson.answers &&
       typeof detailsJson.answers === 'object' &&
       !Array.isArray(detailsJson.answers)
@@ -630,13 +791,38 @@ export class ExamUserService {
     const resultPublishTime = await loadResultPublishTime(examId);
     const includeCorrectAnswers = isAnswerDisclosureAllowed(examId, resultPublishTime);
 
-    const questionIds = (
+    // Legacy attempts may have been written through the trust-based history
+    // endpoint, so their stored question ids are untrusted. When an exam is set,
+    // only questions in that exam's authoritative question set are reviewable.
+    const authorizedQuestionIds = examId
+      ? new Set(await loadExamQuestionIds(examId))
+      : null;
+
+    const storedQuestionIds = (
       storedQuestions.length > 0
         ? storedQuestions.map((question) => question?.id)
         : storedDetails.map((detail) => detail?.question_id)
     )
       .map(normalizeId)
       .filter(Boolean);
+
+    const questionIds = authorizedQuestionIds
+      ? storedQuestionIds.filter((questionId) => authorizedQuestionIds.has(questionId))
+      : storedQuestionIds;
+
+    const reviewableDetails = authorizedQuestionIds
+      ? storedDetails.filter((detail) =>
+          authorizedQuestionIds.has(normalizeId(detail?.question_id))
+        )
+      : storedDetails;
+
+    const answeredQuestionIds = new Set(
+      Object.entries(storedAnswers as Record<string, unknown>)
+        .filter(([, value]) => !isEmptyAnswer(value))
+        .map(([questionId]) => normalizeId(questionId))
+        .filter((questionId) => questionIds.includes(questionId))
+    );
+    const revealKeys = includeCorrectAnswers && answeredQuestionIds.size > 0;
 
     const questionMap =
       questionIds.length > 0
@@ -649,37 +835,55 @@ export class ExamUserService {
     });
 
     const questions: AnyObject[] = questionIds
-      .map((questionId) => {
+      .map((questionId): AnyObject | null => {
+        const revealForQuestion = revealKeys && answeredQuestionIds.has(questionId);
         const currentQuestion = questionMap.get(questionId);
 
         if (currentQuestion) {
-          return buildQuestionSnapshot(currentQuestion, includeCorrectAnswers);
+          return buildQuestionSnapshot(currentQuestion, revealForQuestion);
         }
 
-        return storedQuestionMap.get(questionId) ?? null;
-      })
-      .filter((question): question is AnyObject => Boolean(question));
+        const storedQuestion = storedQuestionMap.get(questionId);
 
-    const details = storedDetails.map((detail) =>
-      enrichDetailWithOptionText(
+        return storedQuestion
+          ? sanitizeStoredQuestionSnapshot(storedQuestion, revealForQuestion)
+          : null;
+      })
+      .filter((question): question is AnyObject => question !== null);
+
+    const details = reviewableDetails.map((detail) =>
+      sanitizeDetailForClient(
         detail,
         questionMap.get(normalizeId(detail?.question_id)),
-        includeCorrectAnswers
+        revealKeys && !isEmptyAnswer(detail?.selected_option)
       )
     );
 
+    const answers = sanitizeAnswerMap(
+      storedAnswers as Record<string, unknown>,
+      new Set(questionIds)
+    );
+
     return {
-      ...record,
-      details_json: {
-        ...detailsJson,
+      id: record.id,
+      exam_id: record.exam_id ?? null,
+      user_id: record.user_id ?? null,
+      score: Number(record.score ?? 0),
+      total_marks: Number(record.total_marks ?? 0),
+      correct_count: Number(record.correct_count ?? 0),
+      wrong_count: Number(record.wrong_count ?? 0),
+      skipped_count: Number(record.skipped_count ?? 0),
+      time_taken: Number(record.time_taken ?? 0),
+      submitted_at: record.submitted_at ?? null,
+      created_at: record.created_at ?? null,
+      status: record.status ?? null,
+      details_json: buildStudentFacingDetailsJson(detailsJson, {
         answers,
         details,
         questions,
-        correct_answers_revealed: includeCorrectAnswers,
-        bookmarked_ids: Array.isArray(detailsJson.bookmarked_ids)
-          ? detailsJson.bookmarked_ids
-          : [],
-      },
+        includeCorrectAnswers: revealKeys,
+        bookmarkedIds: detailsJson.bookmarked_ids,
+      }),
     };
   }
 

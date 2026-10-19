@@ -1,5 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppBuilderService } from './app-builder.service';
+import {
+  parseBannerCreate,
+  parseBannerId,
+  parseBannerUpdate,
+  parseConfigValue,
+  parseHomeGrid,
+  parseHomeGridReorder,
+  parseLevels,
+  parseRecordId,
+  parseXpRules,
+} from './app-builder.validation';
 
 export const getAllConfigs = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
@@ -18,14 +29,14 @@ export const getHomeGrids = async (req: Request, res: Response, next: NextFuncti
 
 export const saveHomeGrid = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.saveHomeGrid(req.body);
+    const data = await AppBuilderService.saveHomeGrid(parseHomeGrid(req.body));
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
 
 export const reorderHomeGrids = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { grids } = req.body;
+    const grids = parseHomeGridReorder(req.body);
     const data = await AppBuilderService.reorderHomeGrids(grids);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
@@ -33,7 +44,7 @@ export const reorderHomeGrids = async (req: Request, res: Response, next: NextFu
 
 export const deleteHomeGrid = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await AppBuilderService.deleteHomeGrid(req.params.id);
+    await AppBuilderService.deleteHomeGrid(parseRecordId(req.params.id));
     res.status(200).json({ success: true, message: 'Grid deleted successfully' });
   } catch (error) { next(error); }
 };
@@ -41,7 +52,7 @@ export const deleteHomeGrid = async (req: Request, res: Response, next: NextFunc
 // --- Config Controllers (Theme, Daily Quote, XP Rules) ---
 export const getDailyQuote = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.getConfig('daily_quote');
+    const data = await AppBuilderService.getPublicConfig('daily_quote');
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
@@ -49,14 +60,14 @@ export const getDailyQuote = async (req: Request, res: Response, next: NextFunct
 export const saveDailyQuote = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { value } = req.body; // Frontend sends { value: payload }
-    const data = await AppBuilderService.saveConfig('daily_quote', value);
+    const data = await AppBuilderService.saveConfig('daily_quote', parseConfigValue(value, 'daily_quote'));
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
 
 export const getThemeConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.getConfig('theme_config');
+    const data = await AppBuilderService.getPublicConfig('theme_config');
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
@@ -64,14 +75,14 @@ export const getThemeConfig = async (req: Request, res: Response, next: NextFunc
 export const saveThemeConfig = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { value } = req.body; // Frontend sends { value: config }
-    const data = await AppBuilderService.saveConfig('theme_config', value);
+    const data = await AppBuilderService.saveConfig('theme_config', parseConfigValue(value, 'theme_config'));
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
 
 export const getXpRules = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.getConfig('xp_rules');
+    const data = await AppBuilderService.getPublicConfig('xp_rules');
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
@@ -79,7 +90,7 @@ export const getXpRules = async (req: Request, res: Response, next: NextFunction
 export const saveXpRules = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     // XP rules frontend sends the whole object as body without 'value' wrapper
-    const data = await AppBuilderService.saveConfig('xp_rules', req.body);
+    const data = await AppBuilderService.saveConfig('xp_rules', parseXpRules(req.body));
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
@@ -94,7 +105,7 @@ export const getBanners = async (req: Request, res: Response, next: NextFunction
 
 export const createBanner = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.createBanner(req.body);
+    const data = await AppBuilderService.createBanner(parseBannerCreate(req.body));
     res.status(201).json({ success: true, data });
   } catch (error) { next(error); }
 };
@@ -102,14 +113,17 @@ export const createBanner = async (req: Request, res: Response, next: NextFuncti
 export const updateBanner = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     // Frontend sends updates object directly as body
-    const data = await AppBuilderService.updateBanner(req.params.id, req.body);
+    const data = await AppBuilderService.updateBanner(
+      parseBannerId(req.params.id),
+      parseBannerUpdate(req.body)
+    );
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };
 
 export const deleteBanner = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    await AppBuilderService.deleteBanner(req.params.id);
+    await AppBuilderService.deleteBanner(parseBannerId(req.params.id));
     res.status(200).json({ success: true, message: 'Banner deleted successfully' });
   } catch (error) { next(error); }
 };
@@ -124,7 +138,7 @@ export const getLevels = async (req: Request, res: Response, next: NextFunction)
 
 export const saveLevels = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const { levels } = req.body;
+    const levels = parseLevels(req.body);
     const data = await AppBuilderService.updateLevels(levels);
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }

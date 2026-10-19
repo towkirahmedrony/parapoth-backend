@@ -58,21 +58,29 @@ export const optionDisplayText = (option: GradingOption | null | undefined): str
 };
 
 /**
- * Correct answers may only be disclosed once the exam author has published
- * results. Practice/arena attempts (no exam paper) are owned by the student
- * and can be reviewed immediately.
+ * Correct answers and explanations are only disclosed for a real, published
+ * exam attempt whose result review window has opened.
+ *
+ * This gate fails closed: a missing exam id, a missing/malformed publish time,
+ * or a publish time in the future all deny disclosure. Practice/arena attempts
+ * (which have no exam paper) never expose the answer key.
  */
 export const isAnswerDisclosureAllowed = (
   examId: string | null | undefined,
   resultPublishTime: string | null | undefined,
   now: number = Date.now()
 ): boolean => {
-  if (!examId) return true;
-  if (!resultPublishTime) return true;
+  const normalizedExamId = String(examId ?? '').trim();
 
-  const publishTime = Date.parse(resultPublishTime);
+  if (!normalizedExamId) return false;
 
-  if (Number.isNaN(publishTime)) return true;
+  const normalizedPublishTime = String(resultPublishTime ?? '').trim();
+
+  if (!normalizedPublishTime) return false;
+
+  const publishTime = Date.parse(normalizedPublishTime);
+
+  if (Number.isNaN(publishTime)) return false;
 
   return now >= publishTime;
 };

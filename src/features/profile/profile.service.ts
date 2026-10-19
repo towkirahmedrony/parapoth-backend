@@ -1,20 +1,48 @@
 import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
-import { UpdateProfileDto, UserProfile } from './profile.types';
+import { UserProfile } from './profile.types';
 import { sendRewardNotification } from '../notifications/notifications.service';
+import {
+  buildProfileUpdatePayload,
+  parseThemePreference,
+} from './profile.validation';
+
+const sanitizeProfileRecord = <T extends Record<string, any>>(profile: T): T => {
+  if (!profile || typeof profile !== 'object') return profile;
+
+  const settings = profile.settings;
+
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return profile;
+  }
+
+  const safeSettings = { ...(settings as Record<string, unknown>) };
+  delete safeSettings.two_factor_secret;
+
+  return { ...profile, settings: safeSettings };
+};
 
 export class ProfileService {
   static async getProfileById(userId: string): Promise<UserProfile> {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw new Error('Profile not found');
-    return data as UserProfile;
+    return sanitizeProfileRecord(data) as UserProfile;
   }
 
-  static async updateProfile(userId: string, data: UpdateProfileDto) {
+  static async updateProfile(userId: string, data: unknown) {
+    if (!userId) throw new Error('Unauthorized');
+
+    // Build an explicit allowlisted payload; never pass req.body to Supabase.
+    const safeUpdate = buildProfileUpdatePayload(data);
+
+    if (Object.keys(safeUpdate).length === 0) {
+      throw new Error('No editable profile fields supplied');
+    }
+
     // আগের প্রোফাইল চেক করা হচ্ছে এক্সপি রিওয়ার্ডের জন্য
     const { data: oldProfile } = await supabase.from('profiles').select('avatar_url, institution, class_level').eq('id', userId).single();
     
-    const { data: updated, error } = await supabase.from('profiles').update(data).eq('id', userId).select().single();
+    const { data: updated, error } = await supabase.from('profiles').update(safeUpdate).eq('id', userId).select().single();
     if (error) throw new Error(error.message);
 
     // প্রোফাইল ১০০% সম্পন্ন হলে XP দেওয়ার লজিক
@@ -33,14 +61,19 @@ export class ProfileService {
         }
       }
     }
-    return updated;
+    return sanitizeProfileRecord(updated);
   }
 
-  static async updateThemePreference(userId: string, theme: string) {
+  static async updateThemePreference(userId: string, theme: unknown) {
+    if (!userId) throw new Error('Unauthorized');
+
+    const safeTheme = parseThemePreference(theme);
+
     const { data: profile } = await supabase.from('profiles').select('settings').eq('id', userId).single();
     
     const currentSettings = (profile?.settings as Record<string, any>) || {};
-    const updatedSettings = { ...currentSettings, theme };
+    const updatedSettings: Record<string, any> = { ...currentSettings, theme: safeTheme };
+    delete updatedSettings.two_factor_secret;
 
     const { data, error } = await supabase
       .from('profiles')

@@ -58,12 +58,19 @@ test('option display text prefers Bangla then English', () => {
   assert.equal(optionDisplayText(null), null);
 });
 
-test('correct answers are disclosed only after the exam publishes results', () => {
+test('correct answers are disclosed only after a real exam publishes results', () => {
   const now = Date.parse('2026-10-18T12:00:00.000Z');
 
-  assert.equal(isAnswerDisclosureAllowed(null, null, now), true);
-  assert.equal(isAnswerDisclosureAllowed(null, '2027-01-01T00:00:00.000Z', now), true);
-  assert.equal(isAnswerDisclosureAllowed('exam-1', null, now), true);
+  // Missing exam context always fails closed, even for practice attempts.
+  assert.equal(isAnswerDisclosureAllowed(null, null, now), false);
+  assert.equal(isAnswerDisclosureAllowed(null, '2027-01-01T00:00:00.000Z', now), false);
+  assert.equal(isAnswerDisclosureAllowed('   ', '2027-01-01T00:00:00.000Z', now), false);
+
+  // A real exam without a valid publish time also fails closed.
+  assert.equal(isAnswerDisclosureAllowed('exam-1', null, now), false);
+  assert.equal(isAnswerDisclosureAllowed('exam-1', '', now), false);
+  assert.equal(isAnswerDisclosureAllowed('exam-1', 'not-a-date', now), false);
+
   assert.equal(isAnswerDisclosureAllowed('exam-1', '2027-01-01T00:00:00.000Z', now), false);
   assert.equal(isAnswerDisclosureAllowed('exam-1', '2026-10-18T11:59:00.000Z', now), true);
 });

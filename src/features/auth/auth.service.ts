@@ -3,11 +3,26 @@ import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { Profile } from './auth.types';
 import crypto from 'crypto';
 
+const withoutSensitiveSettings = (profile: Record<string, any> | null): Profile => {
+  if (!profile) return profile as unknown as Profile;
+
+  const settings = profile.settings;
+
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+    return profile as Profile;
+  }
+
+  const safeSettings = { ...settings };
+  delete safeSettings.two_factor_secret;
+
+  return { ...profile, settings: safeSettings } as Profile;
+};
+
 export const authService = {
   async getProfile(userId: string): Promise<Profile> {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw new Error(`Profile fetch error: ${error.message}`);
-    return data as Profile;
+    return withoutSensitiveSettings(data as Record<string, any>);
   },
 
   async updateLastActive(userId: string): Promise<void> {
