@@ -22,6 +22,8 @@ const state = {
   insertedRows: {} as Record<string, Row[]>,
   xpAwards: [] as Row[],
   insertsRejected: [] as Row[],
+  failNextHistoryInsert: false,
+  failNextXp: false,
 };
 
 let seq = 0;
@@ -79,6 +81,11 @@ const createBuilder = (table: string) => {
     }
 
     if (inserted) {
+      if (table === 'exam_history' && state.failNextHistoryInsert) {
+        state.failNextHistoryInsert = false;
+        return { data: null, error: { message: 'simulated history insert failure' } };
+      }
+
       const rows = inserted.map((row) => {
         seq += 1;
 
@@ -178,7 +185,15 @@ const createBuilder = (table: string) => {
 const fakeSupabase = {
   from: (table: string) => createBuilder(table),
   rpc: async (name: string, args: Row) => {
-    if (name === 'update_user_progress') state.xpAwards.push({ ...args });
+    if (name === 'update_user_progress') {
+      if (state.failNextXp) {
+        state.failNextXp = false;
+        return { data: null, error: { message: 'simulated xp failure' } };
+      }
+
+      state.xpAwards.push({ ...args });
+    }
+
     return { data: null, error: null };
   },
 };
@@ -278,6 +293,15 @@ beforeEach(() => {
       result_publish_time: '2020-01-01T00:00:00.000Z',
     },
     {
+      id: 'exam-future',
+      title: 'Results not yet published',
+      is_published: true,
+      duration_min: 30,
+      total_marks: 1,
+      default_negative_marks: 0.25,
+      result_publish_time: '2099-01-01T00:00:00.000Z',
+    },
+    {
       id: 'exam-draft',
       title: 'Draft exam',
       is_published: false,
@@ -305,7 +329,10 @@ beforeEach(() => {
       result_publish_time: null,
     },
   ];
-  state.examPaperQuestions = [{ exam_id: 'exam-1', question_id: uuid('1'), sequence: 1 }];
+  state.examPaperQuestions = [
+    { exam_id: 'exam-1', question_id: uuid('1'), sequence: 1 },
+    { exam_id: 'exam-future', question_id: uuid('1'), sequence: 1 },
+  ];
   state.attempts = [];
   state.history = [];
   state.profiles = [{ id: 'user-1', current_group_id: 'group-1', full_name: 'Student' }];
@@ -313,6 +340,8 @@ beforeEach(() => {
   state.insertedRows = {};
   state.xpAwards = [];
   state.insertsRejected = [];
+  state.failNextHistoryInsert = false;
+  state.failNextXp = false;
 });
 
 const submit = async (attemptId: string, overrides: Row = {}) =>
@@ -418,6 +447,46 @@ test('H-02: a finalized attempt can never be rewarded a second time', async () =
   assert.equal(state.xpAwards.length, 1);
 });
 
+test('H-02: a failed result write awards no XP and leaves the attempt retryable', async () => {
+  const attempt = seedAttempt();
+  state.failNextHistoryInsert = true;
+
+  await assert.rejects(submit(attempt.id), /simulated history insert failure/);
+
+  assert.equal(state.xpAwards.length, 0);
+  assert.equal(state.history.length, 0);
+  assert.equal(state.attempts[0].status, 'in_progress');
+  assert.equal(state.attempts[0].exam_history_id, null);
+
+  const retry = await submit(attempt.id);
+
+  assert.equal(retry.duplicate, false);
+  assert.equal(retry.earned_xp, 125);
+  assert.equal(state.history.length, 1);
+  assert.equal(state.xpAwards.length, 1);
+  assert.equal(state.attempts[0].awarded_xp, 125);
+});
+
+test('H-02: an XP write failure is reported honestly and never re-awarded', async () => {
+  const attempt = seedAttempt();
+  state.failNextXp = true;
+
+  const first = await submit(attempt.id);
+
+  assert.equal(first.earned_xp, 0);
+  assert.equal(state.xpAwards.length, 0);
+  assert.equal(state.history.length, 1);
+  assert.equal(state.attempts[0].status, 'finalized');
+  assert.equal(state.attempts[0].awarded_xp, 0);
+
+  const retry = await submit(attempt.id);
+
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.earned_xp, 0);
+  assert.equal(state.xpAwards.length, 0);
+  assert.equal(state.history.length, 1);
+});
+
 test('H-02: a legitimate new attempt receives its own reward', async () => {
   const first = seedAttempt();
   await submit(first.id);
@@ -490,6 +559,36 @@ test('H-03: the legacy history endpoint refuses client-calculated results', asyn
   assert.equal(state.xpAwards.length, 0);
 });
 
+test('H-03: client-supplied correctness flags and details never become the stored result', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-future' });
+
+  const result = await ExamUserService.submitExamResult({
+    exam_id: 'exam-future',
+    attempt_id: attempt.id,
+    user_id: 'user-1',
+    answers: { [uuid('1')]: uuid('a') },
+    question_ids: [uuid('1')],
+    details_json: {
+      correct_answers_revealed: true,
+      details: [{ question_id: uuid('1'), is_correct: true, marks_awarded: 100 }],
+      score: 100,
+    },
+    score: 100,
+    correct_count: 1,
+  });
+
+  const stored = state.history[0];
+
+  assert.equal(stored.score, 0);
+  assert.equal(stored.correct_count, 0);
+  assert.equal(stored.wrong_count, 1);
+  assert.equal(stored.details_json.correct_answers_revealed, false);
+  assert.equal(stored.details_json.details[0].is_correct, false);
+  assert.equal(stored.details_json.details[0].marks_awarded, -0.25);
+  assert.equal('isCorrect' in (stored.details_json.questions[0].options[1] ?? {}), false);
+  assert.equal(result.details_json.correct_answers_revealed, false);
+});
+
 test('H-03: historical result retrieval still works for the owner', async () => {
   state.history = [
     {
@@ -511,6 +610,20 @@ test('H-03: historical result retrieval still works for the owner', async () => 
 
   assert.equal(result.id, 'old-1');
   assert.equal(result.score, 1);
+});
+
+test('H-04: every user-facing exam route requires authentication', () => {
+  const { ExamUserRoutes } = require('./exams.user.routes');
+  const stack = ExamUserRoutes.stack || [];
+
+  assert.ok(stack.length > 0);
+
+  for (const layer of stack) {
+    const handlers = layer.route ? layer.route.stack : [layer];
+    const guarded = handlers.some((handler: any) => handler.name === 'requireAuth');
+
+    assert.equal(guarded, true, `unguarded exam route: ${layer.route?.path ?? layer.name}`);
+  }
 });
 
 test('H-04: a group battle cannot create an exam paper', async () => {

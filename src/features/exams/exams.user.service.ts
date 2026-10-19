@@ -783,6 +783,7 @@ export class ExamUserService {
     // awarded for a tracked attempt this request atomically claimed. Untracked
     // practice submissions (and every duplicate submission) earn nothing.
     const earnedXP = attempt ? await calculateExamXP(correct, totalQuestions) : 0;
+    let xpAwarded = false;
 
     if (earnedXP > 0) {
       const { error: progressError } = await supabase.rpc('update_user_progress', {
@@ -795,11 +796,15 @@ export class ExamUserService {
         // The attempt is already claimed and its single history row exists, so
         // a retry still cannot re-award XP. Log for operator follow-up.
         console.error('Update user progress error:', progressError);
+      } else {
+        xpAwarded = true;
       }
     }
 
     if (attempt) {
-      await ExamAttemptService.finalizeAttempt(attempt.id, historyId, earnedXP);
+      // Record only XP that was actually persisted, so the audit column never
+      // claims a reward the user did not receive.
+      await ExamAttemptService.finalizeAttempt(attempt.id, historyId, xpAwarded ? earnedXP : 0);
     }
 
     // Explicit response DTO: never spread the database row (which may contain
@@ -818,7 +823,7 @@ export class ExamUserService {
       submitted_at: result.submitted_at ?? submittedAt,
       created_at: result.created_at ?? null,
       details_json: detailsJson,
-      earned_xp: earnedXP,
+      earned_xp: earnedXP > 0 && xpAwarded ? earnedXP : 0,
       duplicate: false,
       computed_result: {
         score: finalScore,
