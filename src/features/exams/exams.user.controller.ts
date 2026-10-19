@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import { ExamUserService } from './exams.user.service';
+import { ExamAttemptService } from './exam.attempt.service';
 import { incrementStreakOnExamSubmit } from '../growth/streak.service';
 
 const getAuthUserId = (req: Request): string => {
@@ -42,18 +43,87 @@ export const getArena = catchAsync(async (req: Request, res: Response) => {
 });
 
 /**
- * Legacy endpoint.
- * Frontend score trusted না।
- * XP/Streak এখান থেকে দেওয়া হবে না।
+ * Legacy endpoint, retired (410 Gone).
+ * Client-supplied scores are never persisted; use POST /exams/user/submit.
  */
 export const submitHistory = catchAsync(async (req: Request, res: Response) => {
   const userId = getAuthUserId(req);
-  const result = await ExamUserService.submitHistory(userId, req.body);
+  await ExamUserService.submitHistory(userId, req.body);
+
+  sendResponse(res, {
+    statusCode: 410,
+    success: false,
+    message: 'Legacy exam history submission is retired',
+    data: null,
+  });
+});
+
+/** Starts (or resumes) the authoritative server-side attempt for an exam. */
+export const startAttempt = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamAttemptService.startExamAttempt(userId, req.body?.exam_id);
 
   sendResponse(res, {
     statusCode: 200,
     success: true,
-    message: 'Exam history saved',
+    message: 'Exam attempt started',
+    data: result,
+  });
+});
+
+/** Starts an untracked-content practice attempt with a server-side deadline. */
+export const startPracticeAttempt = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamAttemptService.startPracticeAttempt(
+    userId,
+    req.body?.question_ids
+  );
+
+  sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: 'Practice attempt started',
+    data: result,
+  });
+});
+
+export const getAttemptState = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamAttemptService.getAttemptState(userId, req.params.id);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Attempt state fetched',
+    data: result,
+  });
+});
+
+export const saveAttemptAnswers = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamAttemptService.saveDraftAnswers(
+    userId,
+    req.params.id,
+    req.body?.answers,
+    req.body?.current_question_index
+  );
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Draft answers saved',
+    data: result,
+  });
+});
+
+export const getAttemptQuestions = catchAsync(async (req: Request, res: Response) => {
+  const userId = getAuthUserId(req);
+  const result = await ExamUserService.getAttemptQuestions(userId, req.params.id);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Attempt questions fetched',
     data: result,
   });
 });
@@ -66,7 +136,11 @@ export const submitExam = catchAsync(async (req: Request, res: Response) => {
     user_id: userId,
   });
 
-  await incrementStreakOnExamSubmit(userId);
+  // A duplicate submission is not a new study event and must not extend the
+  // user's streak.
+  if (!(result as any)?.duplicate) {
+    await incrementStreakOnExamSubmit(userId);
+  }
 
   sendResponse(res, {
     statusCode: 200,

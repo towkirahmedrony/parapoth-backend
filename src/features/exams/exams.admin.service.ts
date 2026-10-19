@@ -9,8 +9,13 @@ export class ExamAdminService {
   }
 
   static async getExamDetails(id: string) {
-    const { data, error } = await supabase.from('exam_papers').select('*').eq('id', id).single();
+    const { data, error } = await supabase
+      .from('exam_papers')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!data) throw new Error('Exam not found');
     return data;
   }
 
@@ -20,11 +25,41 @@ export class ExamAdminService {
     return data;
   }
 
+  /**
+   * Admin-only publication toggle. Publishing validates that the paper is a
+   * complete exam (question set + authoritative duration) so an incomplete or
+   * unauthorized paper cannot enter the published catalog. This is the ONLY
+   * path that may set is_published to true.
+   */
   static async togglePublish(id: string) {
     const exam = await ExamAdminService.getExamDetails(id);
+
+    if (!exam) throw new Error('Exam not found');
+
+    const nextPublished = !exam.is_published;
+
+    if (nextPublished) {
+      const duration = Number(exam.duration_min);
+
+      if (!Number.isFinite(duration) || duration <= 0) {
+        throw new Error('Cannot publish an exam without a valid duration');
+      }
+
+      const { count, error: countError } = await supabase
+        .from('exam_paper_questions')
+        .select('id', { count: 'exact', head: true })
+        .eq('exam_id', id);
+
+      if (countError) throw new Error(countError.message);
+
+      if (!count) {
+        throw new Error('Cannot publish an exam without questions');
+      }
+    }
+
     const { data, error } = await supabase
       .from('exam_papers')
-      .update({ is_published: !exam.is_published })
+      .update({ is_published: nextPublished })
       .eq('id', id)
       .select()
       .single();

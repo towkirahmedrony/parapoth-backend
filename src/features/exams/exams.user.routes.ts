@@ -6,6 +6,11 @@ import {
   getExamResult,
   submitHistory,
   createGroupBattle,
+  startAttempt,
+  startPracticeAttempt,
+  getAttemptState,
+  saveAttemptAnswers,
+  getAttemptQuestions,
 } from './exams.user.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rateLimit } from '../../middlewares/rateLimit';
@@ -16,19 +21,30 @@ const router = Router();
 // of the published question bank expensive even for a valid account.
 const questionReadLimit = rateLimit({ windowMs: 60_000, max: 60, keyPrefix: 'exam-questions' });
 const submissionLimit = rateLimit({ windowMs: 60_000, max: 20, keyPrefix: 'exam-submit' });
+// Autosave must stay permissive enough for legitimate retries after a network
+// drop, but it still cannot extend a deadline (see ExamAttemptService).
+const answerSaveLimit = rateLimit({ windowMs: 60_000, max: 180, keyPrefix: 'exam-answers' });
 
 router.post('/generate', requireAuth, questionReadLimit, generateExam);
 router.get('/arena', requireAuth, questionReadLimit, getArena);
 
+// Authoritative attempt lifecycle. Start is idempotent and never resets the
+// server-side deadline of an existing in-progress attempt.
+router.post('/attempts/start', requireAuth, submissionLimit, startAttempt);
+router.post('/attempts/practice', requireAuth, submissionLimit, startPracticeAttempt);
+router.get('/attempts/:id', requireAuth, getAttemptState);
+router.get('/attempts/:id/questions', requireAuth, questionReadLimit, getAttemptQuestions);
+router.patch('/attempts/:id/answers', requireAuth, answerSaveLimit, saveAttemptAnswers);
+
 // Owner-scoped attempt review (question text/options resolved server-side)
 router.get('/result/:id', requireAuth, getExamResult);
 
-// Legacy route: XP/Streak/real score এর জন্য ব্যবহার করবেন না
-router.post('/history', requireAuth, submitHistory);
+// Retired legacy route: client-supplied scores are no longer accepted (410).
+router.post('/history', requireAuth, submissionLimit, submitHistory);
 
-// Main secure submit route
+// Main secure submit route (requires a server-issued attempt id / exam attempt)
 router.post('/submit', requireAuth, submissionLimit, submitExam);
 
-router.post('/group-battle', requireAuth, createGroupBattle);
+router.post('/group-battle', requireAuth, submissionLimit, createGroupBattle);
 
 export const ExamUserRoutes = router;

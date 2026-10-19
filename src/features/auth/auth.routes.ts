@@ -1,18 +1,22 @@
 import { Router } from 'express';
 import { authController } from './auth.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
+import { rateLimit } from '../../middlewares/rateLimit';
 
 const router = Router();
 
-// Public Routes
-router.post('/admin/login', authController.adminLoginInit);
-router.post('/admin/verify-2fa', authController.verify2FA); // Moved to public for login flow
-router.post('/save-device', authController.saveDeviceInfo);
+// Credential endpoints are rate limited to slow password/TOTP guessing.
+const loginLimit = rateLimit({ windowMs: 60_000, max: 10, keyPrefix: 'admin-login' });
+
+// Public Routes (genuine credential verification only)
+router.post('/admin/login', loginLimit, authController.adminLoginInit);
+router.post('/admin/verify-2fa', loginLimit, authController.verify2FA);
 
 // Protected Routes
 router.use(requireAuth);
+router.post('/save-device', authController.saveDeviceInfo);
 router.get('/profile', authController.getProfile);
 router.get('/permissions', authController.getRoleAndPermissions);
-router.post('/2fa/setup', authController.setup2FA); 
+router.post('/2fa/setup', authController.setup2FA);
 
 export default router;

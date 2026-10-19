@@ -4,8 +4,8 @@ import { createRequire } from 'node:module';
 
 /**
  * Executes the real ExamUserService against an in-process fake Supabase client.
- * This covers the submit -> details_json -> result review contract without
- * touching a live database.
+ * This covers the attempt -> submit -> details_json -> result review contract
+ * without touching a live database.
  */
 
 type Row = Record<string, any>;
@@ -14,46 +14,82 @@ type FakeState = {
   questions: Row[];
   examPapers: Row[];
   examPaperQuestions: Row[];
+  attempts: Row[];
   history: Row[];
-  insertedHistory: Row | null;
+  insertedHistory: Row[];
   insertedDetails: Row[];
   insertedRows: Record<string, Row[]>;
   tableCalls: string[];
   rpcQuestions: Row[];
+  xpAwards: Row[];
 };
 
 const state: FakeState = {
   questions: [],
   examPapers: [],
   examPaperQuestions: [],
+  attempts: [],
   history: [],
-  insertedHistory: null,
+  insertedHistory: [],
   insertedDetails: [],
   insertedRows: {},
   tableCalls: [],
   rpcQuestions: [],
+  xpAwards: [],
 };
+
+let attemptSeq = 0;
 
 const recordInsert = (table: string, rows: Row[]) => {
   state.insertedRows[table] = state.insertedRows[table] || [];
   state.insertedRows[table].push(...rows);
 };
 
+const sameValue = (actual: any, expected: any) => String(actual) === String(expected);
+
 const createBuilder = (table: string) => {
   const filters: Record<string, any> = {};
+  const ranges: { column: string; op: 'gt' | 'gte'; value: any }[] = [];
   let inserted: Row[] | null = null;
+  let update: Row | null = null;
+  let deleted = false;
+
+  const matches = (row: Row) => {
+    for (const [column, value] of Object.entries(filters)) {
+      if (value === null) {
+        if (row[column] !== null && row[column] !== undefined) return false;
+        continue;
+      }
+      if (Array.isArray(value)) {
+        if (!value.some((candidate) => sameValue(row[column], candidate))) return false;
+        continue;
+      }
+      if (!sameValue(row[column], value)) return false;
+    }
+
+    for (const range of ranges) {
+      const actual = Date.parse(String(row[range.column]));
+      const boundary = Date.parse(String(range.value));
+
+      if (!Number.isFinite(actual)) return false;
+      if (range.op === 'gt' && !(actual > boundary)) return false;
+      if (range.op === 'gte' && !(actual >= boundary)) return false;
+    }
+
+    return true;
+  };
 
   const resolveQuery = (mode: 'many' | 'single') => {
     state.tableCalls.push(`${table}:${mode}`);
 
     if (table === 'exam_papers') {
-      const paper = state.examPapers.find((item) => String(item.id) === String(filters.id));
+      const paper = state.examPapers.find((item) => matches({ ...item }) && matchesId(item));
       return { data: mode === 'single' ? paper ?? null : paper ? [paper] : [], error: null };
     }
 
     if (table === 'exam_paper_questions') {
-      const rows = state.examPaperQuestions.filter(
-        (item) => String(item.exam_id) === String(filters.exam_id)
+      const rows = state.examPaperQuestions.filter((item) =>
+        sameValue(item.exam_id, filters.exam_id)
       );
       return { data: rows, error: null };
     }
@@ -67,21 +103,49 @@ const createBuilder = (table: string) => {
       return { data: rows, error: null };
     }
 
+    if (table === 'exam_progress') {
+      if (inserted) {
+        attemptSeq += 1;
+        const row = {
+          id: `attempt-${attemptSeq}`,
+          answers_draft: {},
+          current_question_index: 0,
+          submitted_at: null,
+          exam_history_id: null,
+          ...inserted[0],
+        };
+        state.attempts.push(row);
+        return { data: mode === 'single' ? row : [row], error: null };
+      }
+
+      if (update) {
+        const rows = state.attempts.filter(matches);
+        rows.forEach((row) => Object.assign(row, update));
+        return { data: rows, error: null };
+      }
+
+      if (deleted) {
+        state.attempts = state.attempts.filter((row) => !matches(row));
+        return { data: [], error: null };
+      }
+
+      const rows = state.attempts.filter(matches);
+      return {
+        data: mode === 'single' ? rows[0] ?? null : rows,
+        error: null,
+      };
+    }
+
     if (table === 'exam_history') {
       if (inserted) {
         const row = { id: 'history-1', created_at: '2026-10-18T12:00:00.000Z', ...inserted[0] };
-        state.insertedHistory = row;
+        state.insertedHistory.push(row);
         state.history.push(row);
         return { data: mode === 'single' ? row : [row], error: null };
       }
 
-      const row = state.history.find(
-        (item) =>
-          String(item.id) === String(filters.id) &&
-          String(item.user_id) === String(filters.user_id)
-      );
-
-      return { data: mode === 'single' ? row ?? null : row ? [row] : [], error: null };
+      const rows = state.history.filter((item) => matches(item));
+      return { data: mode === 'single' ? rows[0] ?? null : rows, error: null };
     }
 
     if (table === 'exam_history_details') {
@@ -111,11 +175,27 @@ const createBuilder = (table: string) => {
       return builder;
     },
     is: () => builder,
+    gt: (column: string, value: any) => {
+      ranges.push({ column, op: 'gt', value });
+      return builder;
+    },
+    gte: (column: string, value: any) => {
+      ranges.push({ column, op: 'gte', value });
+      return builder;
+    },
     order: () => builder,
     limit: () => builder,
     insert: (rows: Row[]) => {
       inserted = rows;
       recordInsert(table, rows);
+      return builder;
+    },
+    update: (values: Row) => {
+      update = values;
+      return builder;
+    },
+    delete: () => {
+      deleted = true;
       return builder;
     },
     maybeSingle: async () => resolveQuery('single'),
@@ -124,12 +204,20 @@ const createBuilder = (table: string) => {
       Promise.resolve(resolveQuery('many')).then(onFulfilled, onRejected),
   };
 
+  // `exam_papers` lookups only ever filter by id; keep behaviour explicit.
+  function matchesId(row: Row) {
+    return filters.id === undefined || sameValue(row.id, filters.id);
+  }
+
   return builder;
 };
 
 const fakeSupabase = {
   from: (table: string) => createBuilder(table),
-  rpc: async (_name: string, _args: Row) => ({ data: state.rpcQuestions, error: null }),
+  rpc: async (_name: string, args: Row) => {
+    state.xpAwards.push({ ...args });
+    return { data: state.rpcQuestions, error: null };
+  },
 };
 
 const require = createRequire(__filename);
@@ -186,7 +274,36 @@ const questions: Row[] = [
 const hasCorrectFlag = (options: Row[]) =>
   options.some((option) => 'isCorrect' in option || 'is_correct' in option);
 
+let attemptCount = 0;
+
+const seedAttempt = (overrides: Row = {}) => {
+  attemptCount += 1;
+  const id = overrides.id ?? `seed-attempt-${attemptCount}`;
+  const row = {
+    id,
+    user_id: 'user-1',
+    exam_id: 'exam-1',
+    kind: 'exam',
+    status: 'in_progress',
+    started_at: new Date(Date.now() - 60_000).toISOString(),
+    deadline_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+    question_ids: [uuid('1'), uuid('2')],
+    answers_draft: {},
+    current_question_index: 0,
+    time_taken: null,
+    last_updated_at: new Date().toISOString(),
+    submitted_at: null,
+    exam_history_id: null,
+    ...overrides,
+  };
+
+  state.attempts.push(row);
+  return row;
+};
+
 beforeEach(() => {
+  attemptSeq = 0;
+  attemptCount = 0;
   state.questions = questions.map((question) => ({ ...question }));
   state.examPapers = [
     {
@@ -232,12 +349,14 @@ beforeEach(() => {
     { id: 'eq-4', exam_id: 'exam-3', question_id: uuid('1'), sequence: 1 },
     { id: 'eq-5', exam_id: 'exam-unpublished', question_id: uuid('1'), sequence: 1 },
   ];
+  state.attempts = [];
   state.history = [];
-  state.insertedHistory = null;
+  state.insertedHistory = [];
   state.insertedDetails = [];
   state.insertedRows = {};
   state.tableCalls = [];
   state.rpcQuestions = questions.map((question) => ({ ...question }));
+  state.xpAwards = [];
 });
 
 test('arena question retrieval never exposes correct flags or explanations', async () => {
@@ -263,8 +382,11 @@ test('generateExam sanitizes correct flags and explanations', async () => {
 });
 
 test('submit stores a reviewable snapshot and grades UUID options correctly', async () => {
+  const attempt = seedAttempt();
+
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: {
       [uuid('1')]: uuid('b'),
@@ -277,6 +399,7 @@ test('submit stores a reviewable snapshot and grades UUID options correctly', as
   assert.equal(result.correct_count, 2);
   assert.equal(result.wrong_count, 0);
   assert.equal(result.score, 2);
+  assert.equal(result.attempt_id, attempt.id);
 
   const detailsJson = result.details_json;
   assert.equal(detailsJson.correct_answers_revealed, true);
@@ -292,11 +415,15 @@ test('submit stores a reviewable snapshot and grades UUID options correctly', as
   assert.equal(detailsJson.details[1].is_correct, true);
   assert.equal(state.insertedDetails.length, 2);
   assert.equal(state.insertedDetails[0].selected_option, uuid('b'));
+  assert.equal(state.xpAwards.length, 1);
 });
 
 test('wrong answers are graded against the option identity, not numeric coercion', async () => {
+  const attempt = seedAttempt();
+
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('a') },
     question_ids: [uuid('1')],
@@ -310,16 +437,16 @@ test('wrong answers are graded against the option identity, not numeric coercion
 });
 
 test('result review is owner-scoped and resolves question text for stored attempts', async () => {
+  const attempt = seedAttempt({ question_ids: [uuid('1')] });
+
   const submitResult = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('b') },
     question_ids: [uuid('1')],
     time_taken: 10,
   });
-
-  state.insertedHistory = null;
-  state.tableCalls = [];
 
   const ownResult = await ExamUserService.getExamResult('user-1', submitResult.id);
   assert.ok(ownResult);
@@ -333,8 +460,11 @@ test('result review is owner-scoped and resolves question text for stored attemp
 });
 
 test('answer disclosure stays hidden before a scheduled result publish time', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-2', question_ids: [uuid('1')] });
+
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-2',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('b') },
     question_ids: [uuid('1')],
@@ -348,8 +478,11 @@ test('answer disclosure stays hidden before a scheduled result publish time', as
 });
 
 test('a missing publish time fails closed', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-3', question_ids: [uuid('1')] });
+
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-3',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('b') },
     question_ids: [uuid('1')],
@@ -361,7 +494,10 @@ test('a missing publish time fails closed', async () => {
 });
 
 test('omitting exam_id never enables answer disclosure', async () => {
+  const attempt = seedAttempt({ exam_id: null, kind: 'practice', question_ids: [uuid('1')] });
+
   const result = await ExamUserService.submitExamResult({
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: { [uuid('1')]: uuid('b') },
     question_ids: [uuid('1')],
@@ -376,8 +512,11 @@ test('omitting exam_id never enables answer disclosure', async () => {
 });
 
 test('submitting question ids without answers does not reveal answer keys', async () => {
+  const attempt = seedAttempt({ question_ids: [uuid('1')] });
+
   const result = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     question_ids: [uuid('1')],
     time_taken: 10,
@@ -395,7 +534,10 @@ test('submitting question ids without answers does not reveal answer keys', asyn
 });
 
 test('omitting exam_id with question ids but no answers reveals nothing protected', async () => {
+  const attempt = seedAttempt({ exam_id: null, kind: 'practice', question_ids: [uuid('1')] });
+
   const result = await ExamUserService.submitExamResult({
+    attempt_id: attempt.id,
     user_id: 'user-1',
     question_ids: [uuid('1')],
     time_taken: 10,
@@ -408,10 +550,14 @@ test('omitting exam_id with question ids but no answers reveals nothing protecte
 });
 
 test('an unknown exam id is rejected and no result is written', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-does-not-exist', question_ids: [uuid('1')] });
+
   await assert.rejects(
     ExamUserService.submitExamResult({
       exam_id: 'exam-does-not-exist',
+      attempt_id: attempt.id,
       user_id: 'user-1',
+      answers: { [uuid('1')]: uuid('b') },
       question_ids: [uuid('1')],
       time_taken: 10,
     }),
@@ -422,9 +568,12 @@ test('an unknown exam id is rejected and no result is written', async () => {
 });
 
 test('an unpublished exam is rejected and no result is written', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-unpublished', question_ids: [uuid('1')] });
+
   await assert.rejects(
     ExamUserService.submitExamResult({
       exam_id: 'exam-unpublished',
+      attempt_id: attempt.id,
       user_id: 'user-1',
       question_ids: [uuid('1')],
       time_taken: 10,
@@ -436,29 +585,49 @@ test('an unpublished exam is rejected and no result is written', async () => {
 });
 
 test('questions from another exam are rejected before any write', async () => {
+  const attempt = seedAttempt();
+
   await assert.rejects(
     ExamUserService.submitExamResult({
       exam_id: 'exam-1',
+      attempt_id: attempt.id,
       user_id: 'user-1',
       answers: { [uuid('3')]: uuid('e') },
       question_ids: [uuid('3')],
       time_taken: 10,
     }),
-    /does not belong to this exam/
+    /does not belong to this attempt/
   );
 
   assert.equal(state.insertedRows.exam_history, undefined);
 });
 
-test('an exam without an authoritative question set fails closed', async () => {
+test('an attempt without an authoritative question set fails closed', async () => {
+  const attempt = seedAttempt({ exam_id: 'exam-empty', question_ids: [] });
+
   await assert.rejects(
     ExamUserService.submitExamResult({
       exam_id: 'exam-empty',
+      attempt_id: attempt.id,
       user_id: 'user-1',
       question_ids: [uuid('1')],
       time_taken: 10,
     }),
-    /question set is not configured/
+    /Attempt has no question set/
+  );
+
+  assert.equal(state.insertedRows.exam_history, undefined);
+});
+
+test('submitting an exam without a started attempt is rejected', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-1',
+      user_id: 'user-1',
+      question_ids: [uuid('1')],
+      time_taken: 10,
+    }),
+    /must be started before submitting/
   );
 
   assert.equal(state.insertedRows.exam_history, undefined);
@@ -521,8 +690,11 @@ test('legacy stored snapshots cannot leak answer keys before results publish', a
 });
 
 test('review uses the exam question order and resolves option text', async () => {
+  const attempt = seedAttempt();
+
   const submitResult = await ExamUserService.submitExamResult({
     exam_id: 'exam-1',
+    attempt_id: attempt.id,
     user_id: 'user-1',
     answers: {
       [uuid('2')]: uuid('c'),

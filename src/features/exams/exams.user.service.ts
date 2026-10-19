@@ -1,5 +1,8 @@
+import crypto from 'crypto';
 import { supabase } from '../../config/supabase';
 import { GenerateExamDTO, SubmitHistoryDTO } from './exams.types';
+import { ATTEMPT_STATUS, isAttemptExpired } from './exam.timing';
+import { ExamAttemptError, ExamAttemptService } from './exam.attempt.service';
 import {
   findOptionById,
   isAnswerCorrect,
@@ -15,6 +18,7 @@ type SubmitExamPayload = {
   exam_id?: string | null;
   session_id?: string | null;
   user_id: string;
+  attempt_id?: string | null;
   answers?: Record<string, string | number | null | undefined>;
   question_ids?: string[];
   time_taken?: number;
@@ -442,99 +446,147 @@ export class ExamUserService {
   }
 
   /**
-   * Legacy endpoint.
-   * এটা score/XP/streak এর জন্য secure source না।
+   * Legacy write endpoint, retired.
+   *
+   * It accepted client-supplied score/correctness/pass values and persisted them
+   * as authoritative results. Grading now only happens in `submitExamResult`
+   * against the server-side answer key, so this route no longer writes anything.
+   * Clients must use POST /api/v1/exams/user/submit with a server-issued
+   * attempt id. The response is an intentional, documented 410.
    */
-  static async submitHistory(userId: string, payload: SubmitHistoryDTO) {
+  static async submitHistory(userId: string, _payload: SubmitHistoryDTO): Promise<never> {
     if (!userId) throw new Error('Unauthorized');
 
-    const resultPayload = {
-      user_id: userId,
-      exam_id: (payload as any).exam_id || null,
-      score: Number((payload as any).score || 0),
-      total_marks: Number((payload as any).total_marks || 0),
-      correct_count: Number((payload as any).correct_count || 0),
-      wrong_count: Number((payload as any).wrong_count || 0),
-      skipped_count: Number((payload as any).skipped_count || 0),
-      time_taken: Number((payload as any).time_taken || 0),
-      details_json: (payload as any).details_json || {},
-      submitted_at: new Date().toISOString(),
-    };
-
-    const { data, error } = await supabase
-      .from('exam_history')
-      .insert([resultPayload])
-      .select()
-      .single();
-
-    if (error) throw new Error(error.message);
-
-    return data;
+    throw new ExamAttemptError(
+      'This legacy endpoint no longer accepts client-calculated results. Submit through /api/v1/exams/user/submit with a server-issued attempt id.',
+      410
+    );
   }
 
   static async submitExamResult(payload: SubmitExamPayload) {
-    const { exam_id, session_id, user_id, time_taken } = payload;
+    const { session_id, user_id, attempt_id } = payload;
 
     if (!user_id) throw new Error('Unauthorized');
 
-    const normalizedExamId = exam_id ? normalizeId(exam_id) : null;
+    const normalizedExamId = payload.exam_id ? normalizeId(payload.exam_id) : null;
     const answers =
       payload.answers && typeof payload.answers === 'object' && !Array.isArray(payload.answers)
         ? payload.answers
         : {};
 
     const requestedQuestionIds = buildQuestionIds(payload.question_ids, answers);
+    const normalizedAttemptId = normalizeId(attempt_id);
 
-    if (requestedQuestionIds.length === 0) {
-      throw new Error('No questions submitted');
+    // Resolve the authoritative attempt. An exam submission must reuse an
+    // attempt the server already started; a server-issued attempt id wins.
+    let attempt: AnyObject | null = null;
+
+    if (normalizedAttemptId) {
+      attempt = await ExamAttemptService.getAttempt(user_id, normalizedAttemptId);
+      if (!attempt) throw new ExamAttemptError('Attempt not found', 404);
+    } else if (normalizedExamId) {
+      attempt = await ExamAttemptService.findActiveExamAttempt(user_id, normalizedExamId);
+      if (!attempt) {
+        throw new ExamAttemptError(
+          'An exam attempt must be started before submitting',
+          409
+        );
+      }
     }
 
-    let defaultNegativeMarks = 0.25;
-    let examTotalMarks: number | null = null;
-    let resultPublishTime: string | null = null;
-    let authoritativeQuestionIds: string[] | null = null;
+    // Untracked practice submissions (no exam paper, no attempt) keep feedback
+    // grading for compatibility, but never award XP and never reveal keys.
+    const untrackedPractice = !attempt;
 
-    if (normalizedExamId) {
-      const { data: examData, error: examError } = await supabase
-        .from('exam_papers')
-        .select('id, default_negative_marks, total_marks, result_publish_time, is_published')
-        .eq('id', normalizedExamId)
-        .maybeSingle();
+    const attemptQuestionIds =
+      attempt && Array.isArray(attempt.question_ids)
+        ? attempt.question_ids.map(normalizeId).filter(Boolean)
+        : [];
 
-      if (examError) throw new Error(examError.message);
-      if (!examData) throw new Error('Exam not found');
-      if (examData.is_published !== true) throw new Error('Exam is not available');
+    const examId = attempt?.exam_id ? normalizeId(attempt.exam_id) : normalizedExamId;
 
-      defaultNegativeMarks = Number(examData.default_negative_marks ?? 0.25);
-      examTotalMarks = Number(examData.total_marks ?? 0);
-      resultPublishTime = examData.result_publish_time ?? null;
+    if (normalizedExamId && examId && normalizedExamId !== examId) {
+      throw new ExamAttemptError('Submitted exam does not match the attempt', 400);
+    }
 
-      authoritativeQuestionIds = await loadExamQuestionIds(normalizedExamId);
+    let questionIds: string[];
 
-      if (authoritativeQuestionIds.length === 0) {
-        throw new Error('Exam question set is not configured');
+    if (untrackedPractice) {
+      if (normalizedExamId) {
+        throw new ExamAttemptError('An exam attempt must be started before submitting', 409);
+      }
+      if (requestedQuestionIds.length === 0) {
+        throw new Error('No questions submitted');
+      }
+      questionIds = requestedQuestionIds;
+    } else {
+      if (attemptQuestionIds.length === 0) {
+        throw new ExamAttemptError('Attempt has no question set', 409);
       }
 
-      const allowedQuestionIds = new Set(authoritativeQuestionIds);
+      // The attempt's frozen question set is authoritative; client ids may only
+      // be a subset of it.
+      const allowedQuestionIds = new Set(attemptQuestionIds);
       const unauthorizedQuestionIds = requestedQuestionIds.filter(
         (questionId) => !allowedQuestionIds.has(questionId)
       );
 
       if (unauthorizedQuestionIds.length > 0) {
-        throw new Error('Submitted question does not belong to this exam');
+        throw new ExamAttemptError('Submitted question does not belong to this attempt', 400);
+      }
+
+      questionIds = attemptQuestionIds;
+    }
+
+    // Atomically claim the attempt before any reward is written. A losing
+    // concurrent/duplicate submission returns the existing result and earns no
+    // additional XP.
+    let historyId: string | null = null;
+
+    if (attempt) {
+      historyId = crypto.randomUUID();
+
+      const claim = await ExamAttemptService.claimAttemptForSubmission(
+        user_id,
+        attempt.id,
+        historyId
+      );
+
+      if (!claim.claimed) {
+        const existing = await ExamAttemptService.findHistoryByAttempt(attempt.id);
+
+        if (existing) {
+          return ExamUserService.buildDuplicateSubmissionResponse(user_id, attempt.id, existing.id);
+        }
+
+        throw new ExamAttemptError('Attempt already submitted', 409);
       }
     }
 
-    // Practice attempts without an exam paper may only reference published
-    // questions, and never disclose the answer key (see the gate below).
-    const questionIds = authoritativeQuestionIds
-      ? authoritativeQuestionIds.filter((questionId) =>
-          requestedQuestionIds.includes(questionId)
-        )
-      : requestedQuestionIds;
+    let defaultNegativeMarks = 0.25;
+    let examTotalMarks: number | null = null;
+    let resultPublishTime: string | null = null;
 
-    if (questionIds.length === 0) {
-      throw new Error('No questions submitted');
+    if (examId) {
+      const { data: examData, error: examError } = await supabase
+        .from('exam_papers')
+        .select('id, default_negative_marks, total_marks, result_publish_time, is_published')
+        .eq('id', examId)
+        .maybeSingle();
+
+      if (examError) {
+        if (attempt && historyId) await ExamAttemptService.releaseClaim(attempt.id);
+        throw new Error(examError.message);
+      }
+
+      if (!examData || examData.is_published !== true) {
+        if (attempt && historyId) await ExamAttemptService.releaseClaim(attempt.id);
+        throw new Error(examData ? 'Exam is not available' : 'Exam not found');
+      }
+
+      defaultNegativeMarks = Number(examData.default_negative_marks ?? 0.25);
+      examTotalMarks = Number(examData.total_marks ?? 0);
+      resultPublishTime = examData.result_publish_time ?? null;
     }
 
     const { data: questions, error: questionsError } = await supabase
@@ -545,7 +597,10 @@ export class ExamUserService {
       .eq('status', 'published')
       .is('deleted_at', null);
 
-    if (questionsError) throw new Error(questionsError.message);
+    if (questionsError) {
+      if (attempt && historyId) await ExamAttemptService.releaseClaim(attempt.id);
+      throw new Error(questionsError.message);
+    }
 
     const questionMap = new Map<string, AnyObject>();
     (questions || []).forEach((q: AnyObject) => {
@@ -553,7 +608,7 @@ export class ExamUserService {
     });
 
     const includeCorrectAnswers = isAnswerDisclosureAllowed(
-      normalizedExamId,
+      examId,
       resultPublishTime
     );
 
@@ -661,18 +716,31 @@ export class ExamUserService {
       }
     );
 
-    const resultPayload = {
-      exam_id: normalizedExamId,
+    // Timing is derived from the persisted attempt, never from the request.
+    const nowMs = Date.now();
+    const startedAtMs = attempt?.started_at ? Date.parse(String(attempt.started_at)) : NaN;
+    const timeTakenSeconds = Number.isFinite(startedAtMs)
+      ? Math.max(0, Math.min(Math.round((nowMs - startedAtMs) / 1000), 24 * 60 * 60))
+      : 0;
+
+    const submittedAt = new Date(nowMs).toISOString();
+    const resultPayload: AnyObject = {
+      exam_id: examId,
+      attempt_id: attempt?.id ?? null,
       user_id,
       score: finalScore,
       total_marks: examTotalMarks || totalQuestions,
       correct_count: correct,
       wrong_count: wrong,
       skipped_count: skipped,
-      time_taken: Number(time_taken || 0),
+      time_taken: timeTakenSeconds,
       details_json: detailsJson,
-      submitted_at: new Date().toISOString(),
+      submitted_at: submittedAt,
     };
+
+    // The history row id is fixed at claim time so a concurrent duplicate can
+    // only ever observe the same single record.
+    if (historyId) resultPayload.id = historyId;
 
     const { data: result, error: submitError } = await supabase
       .from('exam_history')
@@ -680,9 +748,13 @@ export class ExamUserService {
       .select()
       .single();
 
-    if (submitError) throw new Error(submitError.message);
+    if (submitError) {
+      if (attempt) await ExamAttemptService.releaseClaim(attempt.id);
+      throw new Error(submitError.message);
+    }
 
     if (!result?.id) {
+      if (attempt) await ExamAttemptService.releaseClaim(attempt.id);
       throw new Error('Failed to persist exam result');
     }
 
@@ -707,34 +779,47 @@ export class ExamUserService {
       }
     }
 
-    const earnedXP = await calculateExamXP(correct, totalQuestions);
+    // XP is computed on the trusted side from authoritative grading and is only
+    // awarded for a tracked attempt this request atomically claimed. Untracked
+    // practice submissions (and every duplicate submission) earn nothing.
+    const earnedXP = attempt ? await calculateExamXP(correct, totalQuestions) : 0;
 
-    const { error: progressError } = await supabase.rpc('update_user_progress', {
-      p_user_id: user_id,
-      p_coins: 0,
-      p_xp: earnedXP,
-    });
+    if (earnedXP > 0) {
+      const { error: progressError } = await supabase.rpc('update_user_progress', {
+        p_user_id: user_id,
+        p_coins: 0,
+        p_xp: earnedXP,
+      });
 
-    if (progressError) {
-      console.error('Update user progress error:', progressError);
+      if (progressError) {
+        // The attempt is already claimed and its single history row exists, so
+        // a retry still cannot re-award XP. Log for operator follow-up.
+        console.error('Update user progress error:', progressError);
+      }
+    }
+
+    if (attempt) {
+      await ExamAttemptService.finalizeAttempt(attempt.id, historyId, earnedXP);
     }
 
     // Explicit response DTO: never spread the database row (which may contain
     // grading-only fields in future schema versions).
     return {
       id: result.id,
-      exam_id: result.exam_id ?? normalizedExamId,
+      attempt_id: attempt?.id ?? null,
+      exam_id: result.exam_id ?? examId,
       user_id: result.user_id ?? user_id,
       score: Number(result.score ?? finalScore),
       total_marks: Number(result.total_marks ?? (examTotalMarks || totalQuestions)),
       correct_count: Number(result.correct_count ?? correct),
       wrong_count: Number(result.wrong_count ?? wrong),
       skipped_count: Number(result.skipped_count ?? skipped),
-      time_taken: Number(result.time_taken ?? time_taken ?? 0),
-      submitted_at: result.submitted_at ?? null,
+      time_taken: Number(result.time_taken ?? timeTakenSeconds),
+      submitted_at: result.submitted_at ?? submittedAt,
       created_at: result.created_at ?? null,
       details_json: detailsJson,
       earned_xp: earnedXP,
+      duplicate: false,
       computed_result: {
         score: finalScore,
         total_questions: totalQuestions,
@@ -742,6 +827,103 @@ export class ExamUserService {
         wrong_count: wrong,
         skipped_count: skipped,
       },
+    };
+  }
+
+  /**
+   * Response for a repeated submission of an attempt that was already claimed.
+   * It returns the existing result without re-grading, re-writing or re-awarding
+   * XP, so retries and concurrent duplicates are idempotent.
+   */
+  static async buildDuplicateSubmissionResponse(
+    userId: string,
+    attemptId: string,
+    historyId: string
+  ) {
+    const { data: history } = await supabase
+      .from('exam_history')
+      .select(
+        'id, exam_id, attempt_id, user_id, score, total_marks, correct_count, wrong_count, skipped_count, time_taken, submitted_at, created_at'
+      )
+      .eq('id', historyId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    return {
+      id: historyId,
+      attempt_id: attemptId,
+      exam_id: history?.exam_id ?? null,
+      user_id: userId,
+      score: Number(history?.score ?? 0),
+      total_marks: Number(history?.total_marks ?? 0),
+      correct_count: Number(history?.correct_count ?? 0),
+      wrong_count: Number(history?.wrong_count ?? 0),
+      skipped_count: Number(history?.skipped_count ?? 0),
+      time_taken: Number(history?.time_taken ?? 0),
+      submitted_at: history?.submitted_at ?? null,
+      created_at: history?.created_at ?? null,
+      details_json: null,
+      earned_xp: 0,
+      duplicate: true,
+      message: 'This attempt has already been submitted',
+    };
+  }
+
+  /**
+   * Returns the protected question content for an in-progress attempt.
+   *
+   * This is a security-sensitive read: an expired, submitted or finalized
+   * attempt never receives exam content, and the answer key is never included.
+   */
+  static async getAttemptQuestions(userId: string, attemptId: string) {
+    if (!userId) throw new Error('Unauthorized');
+
+    const attempt = await ExamAttemptService.getAttempt(userId, attemptId);
+
+    if (!attempt) throw new ExamAttemptError('Attempt not found', 404);
+
+    if (attempt.status !== ATTEMPT_STATUS.IN_PROGRESS || isAttemptExpired(attempt.deadline_at)) {
+      if (attempt.status === ATTEMPT_STATUS.IN_PROGRESS) {
+        await ExamAttemptService.expireAttempt(attempt.id);
+      }
+
+      throw new ExamAttemptError('Exam attempt is no longer active', 409);
+    }
+
+    const questionIds = Array.isArray(attempt.question_ids)
+      ? attempt.question_ids.map(normalizeId).filter(Boolean)
+      : [];
+
+    if (questionIds.length === 0) {
+      throw new ExamAttemptError('Attempt has no question set', 409);
+    }
+
+    const { data, error } = await supabase
+      .from('questions')
+      .select(EXAM_QUESTION_SELECT_QUERY)
+      .in('id', questionIds)
+      .eq('is_active', true)
+      .eq('status', 'published')
+      .is('deleted_at', null);
+
+    if (error) throw new Error(error.message);
+
+    const byId = new Map<string, AnyObject>();
+    (data || []).forEach((question: AnyObject) => byId.set(normalizeId(question.id), question));
+
+    // Preserve the frozen attempt order and drop anything that is no longer
+    // available rather than leaking an unpublished question.
+    const ordered = questionIds
+      .map((questionId) => byId.get(questionId))
+      .filter((question): question is AnyObject => Boolean(question));
+
+    return {
+      attempt_id: attempt.id,
+      exam_id: attempt.exam_id ?? null,
+      started_at: attempt.started_at ?? null,
+      deadline_at: attempt.deadline_at ?? null,
+      server_time: new Date().toISOString(),
+      questions: sanitizeQuestionsForClient(ordered),
     };
   }
 
@@ -887,6 +1069,13 @@ export class ExamUserService {
     };
   }
 
+  /**
+   * Starts a group battle against an EXISTING published exam paper.
+   *
+   * Exam papers are never created here: paper authoring and publication are
+   * admin-only (see ExamAdminService). Ownership of the battle comes from the
+   * authenticated challenger, never from the request body.
+   */
   static async createGroupBattleExam(
     challengerId: string,
     opponentId: string,
@@ -894,24 +1083,49 @@ export class ExamUserService {
   ) {
     if (!challengerId) throw new Error('Unauthorized');
 
-    if (challengerId === opponentId) {
+    const normalizedOpponentId = normalizeId(opponentId);
+
+    if (!normalizedOpponentId) {
+      throw new ExamAttemptError('Opponent id is required', 400);
+    }
+
+    if (challengerId === normalizedOpponentId) {
       throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন না!');
     }
 
-    const { data, error } = await supabase
+    const examId = normalizeId(examData?.exam_id ?? examData?.id);
+
+    if (!examId) {
+      throw new ExamAttemptError(
+        'An existing published exam is required to start a group battle',
+        400
+      );
+    }
+
+    const { data: exam, error: examError } = await supabase
       .from('exam_papers')
+      .select('id, is_published')
+      .eq('id', examId)
+      .maybeSingle();
+
+    if (examError) throw new Error(examError.message);
+    if (!exam || exam.is_published !== true) {
+      throw new ExamAttemptError('Exam is not available', 403);
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('current_group_id')
+      .eq('id', challengerId)
+      .maybeSingle();
+
+    const { data, error } = await supabase
+      .from('group_battles')
       .insert({
-        id: examData.id,
-        title: examData.title,
-        subject_id: examData.subject_id,
-        category: 'group_battle',
-        is_premium: false,
-        total_marks: examData.total_marks || 50,
-        pass_mark: examData.pass_mark || 0,
-        duration_min: examData.duration_min || 15,
-        is_published: true,
-        start_time: examData.start_time,
-        end_time: examData.end_time,
+        exam_id: exam.id,
+        group_id: profile?.current_group_id ?? null,
+        initiated_by: challengerId,
+        status: 'pending',
       })
       .select()
       .single();

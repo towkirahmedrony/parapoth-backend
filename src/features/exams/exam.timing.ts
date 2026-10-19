@@ -1,0 +1,128 @@
+/**
+ * Pure, dependency-free timing helpers for the authoritative exam attempt
+ * lifecycle. Deadlines are always derived and evaluated on the trusted server;
+ * no client timestamp is ever accepted as authoritative.
+ */
+
+export const ATTEMPT_STATUS = {
+  IN_PROGRESS: 'in_progress',
+  SUBMITTED: 'submitted',
+  EXPIRED: 'expired',
+  FINALIZED: 'finalized',
+} as const;
+
+export type AttemptStatus = (typeof ATTEMPT_STATUS)[keyof typeof ATTEMPT_STATUS];
+
+export const ATTEMPT_KIND = {
+  EXAM: 'exam',
+  PRACTICE: 'practice',
+} as const;
+
+export type AttemptKind = (typeof ATTEMPT_KIND)[keyof typeof ATTEMPT_KIND];
+
+export const MINUTE_MS = 60_000;
+
+/** Conservative default when no arena duration is configured. */
+export const DEFAULT_PRACTICE_DURATION_MIN = 60;
+
+export type ExamTimingConfig = {
+  duration_min?: number | string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+};
+
+export const toEpochMs = (value: unknown): number | null => {
+  if (value === null || value === undefined || value === '') return null;
+
+  const parsed = Date.parse(String(value));
+
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+/**
+ * The deadline is the earlier of (started_at + duration) and the exam window
+ * end. Returns null when neither exists, which callers must treat as a failure
+ * to establish authoritative timing (fail closed).
+ */
+export const resolveAttemptDeadline = (
+  exam: ExamTimingConfig | null | undefined,
+  startedAtMs: number
+): number | null => {
+  const durationMinutes = Number(exam?.duration_min);
+  const windowEnd = toEpochMs(exam?.end_time);
+
+  let durationDeadline: number | null = null;
+
+  if (Number.isFinite(durationMinutes) && durationMinutes > 0) {
+    durationDeadline = startedAtMs + durationMinutes * MINUTE_MS;
+  }
+
+  if (durationDeadline === null) return windowEnd;
+  if (windowEnd === null) return durationDeadline;
+
+  return Math.min(durationDeadline, windowEnd);
+};
+
+export type ExamWindowCheck =
+  | { allowed: true }
+  | { allowed: false; reason: 'not_started' | 'window_closed' };
+
+/**
+ * Validates the exam's published window. A null window is treated as open
+ * (existing exams may not configure one); the attempt deadline still bounds the
+ * attempt.
+ */
+export const checkExamWindow = (
+  exam: ExamTimingConfig | null | undefined,
+  nowMs: number = Date.now()
+): ExamWindowCheck => {
+  const windowStart = toEpochMs(exam?.start_time);
+  const windowEnd = toEpochMs(exam?.end_time);
+
+  if (windowStart !== null && nowMs < windowStart) {
+    return { allowed: false, reason: 'not_started' };
+  }
+
+  if (windowEnd !== null && nowMs > windowEnd) {
+    return { allowed: false, reason: 'window_closed' };
+  }
+
+  return { allowed: true };
+};
+
+/**
+ * The deadline is inclusive: an operation at exactly deadline_at is allowed,
+ * anything after it is expired. This is the single documented rule used by all
+ * enforcement points.
+ */
+export const isAttemptExpired = (
+  deadlineAt: unknown,
+  nowMs: number = Date.now()
+): boolean => {
+  const deadline = toEpochMs(deadlineAt);
+
+  if (deadline === null) return true;
+
+  return nowMs > deadline;
+};
+
+export const resolvePracticeDeadline = (
+  startedAtMs: number,
+  durationMinutes?: number | null
+): number => {
+  const resolved = Number(durationMinutes);
+
+  const minutes =
+    Number.isFinite(resolved) && resolved > 0 ? resolved : DEFAULT_PRACTICE_DURATION_MIN;
+
+  return startedAtMs + minutes * MINUTE_MS;
+};
+
+export const isAttemptOpen = (attempt: {
+  status?: string | null;
+  deadline_at?: string | null;
+}): boolean => {
+  if (attempt?.status !== ATTEMPT_STATUS.IN_PROGRESS) return false;
+
+  return !isAttemptExpired(attempt.deadline_at);
+};
