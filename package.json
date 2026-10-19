@@ -7,7 +7,7 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "test": "tsx --test src/features/exams/exam.grading.spec.ts src/features/exams/exam.service.spec.ts src/features/profile/profile.security.spec.ts src/features/app-builder/app-builder.security.spec.ts",
+    "test": "tsx --test src/features/exams/exam.grading.spec.ts src/features/exams/exam.service.spec.ts src/features/profile/profile.security.spec.ts src/features/app-builder/app-builder.security.spec.ts src/features/history/history.security.spec.ts",
     "lint": "eslint . --ext .ts",
     "format": "prettier --write \"src/**/*.ts\""
   },
