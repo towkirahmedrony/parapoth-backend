@@ -44,24 +44,43 @@ const app: Application = express();
 // 🚀 [FIX]: প্রক্সি সার্ভার থেকে আসল ইউজারের আইপি রিসিভ করার জন্য এনাবল করা হলো
 app.set('trust proxy', true);
 
-const envClientUrls = process.env.CLIENT_URL 
-  ? process.env.CLIENT_URL.split(',') 
-  : [];
+/**
+ * Browsers serialise `Origin` without a path or trailing slash. Operators,
+ * however, routinely paste `https://example.com/` into CLIENT_URL. Comparing
+ * the two raw strings rejected the production origin and turned every
+ * preflight into a 500, so both sides are normalised before comparison.
+ */
+const normalizeOrigin = (value: string): string =>
+  value.trim().replace(/\/+$/, '').toLowerCase();
 
-const allowedOrigins = [
-  ...envClientUrls, 
-  'http://localhost:5173', 
-  'http://localhost:5174',
-  'http://127.0.0.1:5174',
-  'https://parapoth-studio.web.app'
-].filter(Boolean) as string[];
+const envClientUrls = (process.env.CLIENT_URL ?? '')
+  .split(',')
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const defaultOrigins = ['https://parapoth-studio.web.app'];
+
+// Local development origins must never widen the production allowlist.
+if (process.env.NODE_ENV !== 'production') {
+  defaultOrigins.push(
+    'http://localhost:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174'
+  );
+}
+
+const allowedOrigins = [...envClientUrls, ...defaultOrigins].map(normalizeOrigin);
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(normalizeOrigin(origin))) {
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      // A rejected origin is a client error, not an internal failure. Returning
+      // 403 keeps monitoring meaningful and makes the cause greppable.
+      const error = new Error('Origin not allowed by CORS') as CustomError;
+      error.status = 403;
+      callback(error);
     }
   },
   credentials: true
@@ -146,17 +165,49 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 interface CustomError extends Error {
   status?: number;
   statusCode?: number;
+  code?: string;
 }
+
+/**
+ * A PostgREST error caused by a column/relation the code expects but the
+ * connected database does not have. That is an operational state, so it is
+ * reported as 503 (dependency unavailable) rather than an opaque 500.
+ */
+const isSchemaDriftError = (err: CustomError): boolean =>
+  err.code === '42703' ||
+  err.code === 'PGRST204' ||
+  /column .* does not exist/i.test(err.message ?? '') ||
+  /could not find the '.*' column/i.test(err.message ?? '');
 
 // Global Error Handler
 app.use((err: CustomError, req: Request, res: Response, next: NextFunction) => {
-  // Removed console.error for strict production quality
-  const statusCode = err.status || err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  const schemaDrift = isSchemaDriftError(err);
+  const statusCode = err.status || err.statusCode || (schemaDrift ? 503 : 500);
+
+  // Server-side failures were previously silent, which made production
+  // incidents undiagnosable. Log the route and error only: never headers,
+  // bodies, tokens or answer payloads.
+  if (statusCode >= 500) {
+    console.error('[api:error]', {
+      method: req.method,
+      path: req.originalUrl,
+      status: statusCode,
+      message: err.message
+    });
+  }
+
+  // 4xx messages are intentionally actionable for the client; 5xx details
+  // (SQL text, stack traces, internal identifiers) must never reach students.
+  const message =
+    statusCode >= 500
+      ? schemaDrift
+        ? 'A required service dependency is not available'
+        : 'Internal Server Error'
+      : err.message || 'Request failed';
 
   res.status(statusCode).json({
     success: false,
-    message: message,
+    message,
     data: null
   });
 });

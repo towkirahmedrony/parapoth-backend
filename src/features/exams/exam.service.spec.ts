@@ -138,7 +138,22 @@ const createBuilder = (table: string) => {
 
     if (table === 'exam_history') {
       if (inserted) {
-        const row = { id: 'history-1', created_at: '2026-10-18T12:00:00.000Z', ...inserted[0] };
+        const candidate = inserted[0];
+        const rowId = candidate.id ?? 'history-1';
+
+        // Mirrors the real primary-key constraint: a repeated insert with the
+        // same id fails with 23505 instead of creating a second row.
+        if (state.history.some((item) => String(item.id) === String(rowId))) {
+          return {
+            data: null,
+            error: {
+              code: '23505',
+              message: 'duplicate key value violates unique constraint "exam_history_pkey"',
+            },
+          };
+        }
+
+        const row = { id: rowId, created_at: '2026-10-18T12:00:00.000Z', ...candidate };
         state.insertedHistory.push(row);
         state.history.push(row);
         return { data: mode === 'single' ? row : [row], error: null };
@@ -708,4 +723,116 @@ test('review uses the exam question order and resolves option text', async () =>
     submitResult.details_json.questions.map((question: Row) => question.id),
     [uuid('1'), uuid('2')]
   );
+});
+
+/**
+ * The model-test ("Arena") flow is a practice submission: no exam paper and no
+ * server-issued attempt. These cases cover that path, which previously had no
+ * coverage and is the path production students actually use.
+ */
+
+const practicePayload = (overrides: Row = {}) => ({
+  session_id: 'practice-session-1',
+  user_id: 'user-1',
+  answers: { [uuid('1')]: uuid('b') },
+  question_ids: [uuid('1')],
+  time_taken: 42,
+  ...overrides,
+});
+
+test('a practice submission persists without referencing attempt_id', async () => {
+  const result = await ExamUserService.submitExamResult(practicePayload());
+
+  assert.equal(result.duplicate, false);
+  assert.equal(result.attempt_id, null);
+  assert.equal(result.correct_count, 1);
+  assert.equal(result.wrong_count, 0);
+  assert.equal(result.score, 1);
+
+  const inserted = state.insertedRows.exam_history[0];
+  assert.ok(inserted, 'one history row is written');
+
+  // A database that has not applied the attempt-lifecycle migration has no
+  // attempt_id column; sending an explicit null there fails every submission.
+  assert.equal('attempt_id' in inserted, false);
+  assert.equal(inserted.time_taken, 42);
+  assert.equal(inserted.score, 1);
+});
+
+test('the reported duration is preserved for practice submissions', async () => {
+  await ExamUserService.submitExamResult(practicePayload({ time_taken: 123 }));
+
+  assert.equal(state.insertedRows.exam_history[0].time_taken, 123);
+});
+
+test('a repeated practice submission with the same key returns the first result', async () => {
+  const first = await ExamUserService.submitExamResult(practicePayload());
+  const second = await ExamUserService.submitExamResult(practicePayload());
+
+  assert.equal(second.id, first.id);
+  assert.equal(second.duplicate, true);
+  assert.equal(second.score, first.score);
+  assert.equal(second.earned_xp, 0);
+
+  assert.equal(state.insertedHistory.length, 1, 'only one result row exists');
+  assert.equal(state.history.length, 1);
+
+  // The repeat response must still be renderable by the result page.
+  assert.equal(second.details_json.questions[0].id, uuid('1'));
+  assert.equal(second.details_json.details[0].selected_option_text, 'খ');
+});
+
+test('different submission keys create separate results', async () => {
+  const first = await ExamUserService.submitExamResult(
+    practicePayload({ session_id: 'practice-session-a' })
+  );
+  const second = await ExamUserService.submitExamResult(
+    practicePayload({ session_id: 'practice-session-b' })
+  );
+
+  assert.notEqual(second.id, first.id);
+  assert.equal(state.insertedHistory.length, 2);
+});
+
+test('an unusable session id does not break submission', async () => {
+  const result = await ExamUserService.submitExamResult(
+    practicePayload({ session_id: 'not a valid key: with spaces' })
+  );
+
+  assert.equal(result.correct_count, 1);
+  assert.equal(state.insertedHistory.length, 1);
+});
+
+test('an attempt-bound submission still records the attempt linkage', async () => {
+  const attempt = seedAttempt();
+
+  const result = await ExamUserService.submitExamResult({
+    exam_id: 'exam-1',
+    attempt_id: attempt.id,
+    user_id: 'user-1',
+    answers: { [uuid('1')]: uuid('b') },
+    question_ids: [uuid('1')],
+    time_taken: 10,
+  });
+
+  assert.equal(result.attempt_id, attempt.id);
+  assert.equal(state.insertedRows.exam_history[0].attempt_id, attempt.id);
+});
+
+test("another user's attempt cannot be submitted", async () => {
+  const attempt = seedAttempt();
+
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      exam_id: 'exam-1',
+      attempt_id: attempt.id,
+      user_id: 'user-2',
+      answers: { [uuid('1')]: uuid('b') },
+      question_ids: [uuid('1')],
+      time_taken: 10,
+    }),
+    /Attempt not found/
+  );
+
+  assert.equal(state.insertedHistory.length, 0);
 });

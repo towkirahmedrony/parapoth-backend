@@ -55,6 +55,71 @@ const calculateExamXP = async (
 
 const normalizeId = (value: unknown): string => String(value ?? '').trim();
 
+/**
+ * Client-supplied idempotency key for a submission.
+ *
+ * Only a conservative shape is accepted. An unusable value is ignored (the
+ * submission still works, it simply keeps no idempotency guarantee) so a
+ * malformed key can never influence the persisted primary key.
+ */
+const normalizeSubmissionKey = (value: unknown): string | null => {
+  const raw = String(value ?? '').trim();
+
+  return /^[A-Za-z0-9_-]{8,128}$/.test(raw) ? raw : null;
+};
+
+/**
+ * Derives the `exam_history` primary key from (user, submission key).
+ *
+ * `exam_history.id` is the only unique key that exists on every deployment, so
+ * using it as the idempotency key makes a repeated submission collide with the
+ * first one (unique violation) instead of writing a second result. Including the
+ * user id keeps two students with the same key in separate rows.
+ */
+const deterministicHistoryId = (userId: string, submissionKey: string): string => {
+  const digest = crypto
+    .createHash('sha256')
+    .update(`porokh-exam-submission:${userId}:${submissionKey}`)
+    .digest('hex')
+    .split('');
+
+  // Present the digest as a well-formed v4-shaped UUID.
+  digest[12] = '4';
+  digest[16] = ((parseInt(digest[16], 16) & 0x3) | 0x8).toString(16);
+
+  const hex = digest.slice(0, 32).join('');
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+};
+
+const MAX_TIME_TAKEN_SECONDS = 24 * 60 * 60;
+
+const clampTimeTaken = (value: unknown): number => {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) return 0;
+
+  return Math.max(0, Math.min(Math.round(number), MAX_TIME_TAKEN_SECONDS));
+};
+
+/**
+ * A PostgREST error raised because a column the code expects does not exist in
+ * the connected database. This is an operational state (schema not migrated),
+ * not a client error, so callers map it to a clear 503 instead of a 500.
+ */
+const isSchemaDriftError = (error: unknown): boolean => {
+  const candidate = error as AnyObject;
+  const code = String(candidate?.code ?? '');
+  const message = String(candidate?.message ?? '');
+
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    /column .* does not exist/i.test(message) ||
+    /could not find the '.*' column/i.test(message)
+  );
+};
+
 const isEmptyAnswer = (value: unknown): boolean => {
   return value === undefined || value === null || String(value).trim() === '';
 };
@@ -476,22 +541,34 @@ export class ExamUserService {
 
     const requestedQuestionIds = buildQuestionIds(payload.question_ids, answers);
     const normalizedAttemptId = normalizeId(attempt_id);
+    const submissionKey = normalizeSubmissionKey(session_id);
 
     // Resolve the authoritative attempt. An exam submission must reuse an
     // attempt the server already started; a server-issued attempt id wins.
     let attempt: AnyObject | null = null;
 
-    if (normalizedAttemptId) {
-      attempt = await ExamAttemptService.getAttempt(user_id, normalizedAttemptId);
-      if (!attempt) throw new ExamAttemptError('Attempt not found', 404);
-    } else if (normalizedExamId) {
-      attempt = await ExamAttemptService.findActiveExamAttempt(user_id, normalizedExamId);
-      if (!attempt) {
+    try {
+      if (normalizedAttemptId) {
+        attempt = await ExamAttemptService.getAttempt(user_id, normalizedAttemptId);
+        if (!attempt) throw new ExamAttemptError('Attempt not found', 404);
+      } else if (normalizedExamId) {
+        attempt = await ExamAttemptService.findActiveExamAttempt(user_id, normalizedExamId);
+        if (!attempt) {
+          throw new ExamAttemptError(
+            'An exam attempt must be started before submitting',
+            409
+          );
+        }
+      }
+    } catch (error) {
+      if (isSchemaDriftError(error)) {
         throw new ExamAttemptError(
-          'An exam attempt must be started before submitting',
-          409
+          'Examination attempt tracking is not available on this deployment',
+          503
         );
       }
+
+      throw error;
     }
 
     // Untracked practice submissions (no exam paper, no attempt) keep feedback
@@ -561,6 +638,10 @@ export class ExamUserService {
 
         throw new ExamAttemptError('Attempt already submitted', 409);
       }
+    } else if (submissionKey) {
+      // Practice submissions are not attempt-bound, so the deterministic
+      // primary key is what makes a retry or refresh idempotent.
+      historyId = deterministicHistoryId(user_id, submissionKey);
     }
 
     let defaultNegativeMarks = 0.25;
@@ -716,17 +797,18 @@ export class ExamUserService {
       }
     );
 
-    // Timing is derived from the persisted attempt, never from the request.
+    // Timing is derived from the persisted attempt when there is one. Practice
+    // submissions have no server-side start, so the reported duration is used
+    // but clamped to a sane range.
     const nowMs = Date.now();
     const startedAtMs = attempt?.started_at ? Date.parse(String(attempt.started_at)) : NaN;
     const timeTakenSeconds = Number.isFinite(startedAtMs)
-      ? Math.max(0, Math.min(Math.round((nowMs - startedAtMs) / 1000), 24 * 60 * 60))
-      : 0;
+      ? clampTimeTaken((nowMs - startedAtMs) / 1000)
+      : clampTimeTaken(payload.time_taken);
 
     const submittedAt = new Date(nowMs).toISOString();
     const resultPayload: AnyObject = {
       exam_id: examId,
-      attempt_id: attempt?.id ?? null,
       user_id,
       score: finalScore,
       total_marks: examTotalMarks || totalQuestions,
@@ -738,8 +820,15 @@ export class ExamUserService {
       submitted_at: submittedAt,
     };
 
-    // The history row id is fixed at claim time so a concurrent duplicate can
-    // only ever observe the same single record.
+    // Only write attempt_id when an attempt actually exists. Writing an
+    // explicit null requires the column to exist, which would make every
+    // submission fail on a database that has not applied the attempt
+    // lifecycle migration. Omitting the key is equivalent for legacy rows,
+    // whose attempt_id is null anyway.
+    if (attempt) resultPayload.attempt_id = attempt.id;
+
+    // The history row id is fixed at claim time (attempts) or derived from the
+    // submission key (practice) so a duplicate can only observe one record.
     if (historyId) resultPayload.id = historyId;
 
     const { data: result, error: submitError } = await supabase
@@ -749,7 +838,41 @@ export class ExamUserService {
       .single();
 
     if (submitError) {
+      // A duplicate submission (concurrent request, retry, or a response lost
+      // after the row was written) collides with an existing unique key. Return
+      // that authoritative result instead of creating a second one.
+      if ((submitError as AnyObject).code === '23505') {
+        const existing = attempt
+          ? await ExamAttemptService.findHistoryByAttempt(attempt.id)
+          : historyId
+            ? (
+                await supabase
+                  .from('exam_history')
+                  .select('id, user_id')
+                  .eq('id', historyId)
+                  .eq('user_id', user_id)
+                  .maybeSingle()
+              ).data
+            : null;
+
+        if (existing?.id) {
+          return ExamUserService.buildDuplicateSubmissionResponse(
+            user_id,
+            attempt?.id ?? null,
+            normalizeId(existing.id)
+          );
+        }
+      }
+
       if (attempt) await ExamAttemptService.releaseClaim(attempt.id);
+
+      if (isSchemaDriftError(submitError)) {
+        throw new ExamAttemptError(
+          'Examination storage is not provisioned on this deployment',
+          503
+        );
+      }
+
       throw new Error(submitError.message);
     }
 
@@ -842,31 +965,40 @@ export class ExamUserService {
    */
   static async buildDuplicateSubmissionResponse(
     userId: string,
-    attemptId: string,
+    attemptId: string | null,
     historyId: string
   ) {
-    const { data: history } = await supabase
-      .from('exam_history')
-      .select(
-        'id, exam_id, attempt_id, user_id, score, total_marks, correct_count, wrong_count, skipped_count, time_taken, submitted_at, created_at'
-      )
-      .eq('id', historyId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    // Reuse the owner-scoped result reader: it applies the same sanitisation
+    // and answer-disclosure rules as a first submission, so the returning
+    // student sees the authoritative review data rather than an empty page.
+    const existing = await ExamUserService.getExamResult(userId, historyId);
 
+    if (existing) {
+      return {
+        ...existing,
+        attempt_id: attemptId,
+        earned_xp: 0,
+        duplicate: true,
+        message: 'This attempt has already been submitted',
+      };
+    }
+
+    // Defensive fallback: the row is visible as a unique conflict but is not
+    // readable for this user (or was deleted concurrently). Never invent a new
+    // result row for it.
     return {
       id: historyId,
       attempt_id: attemptId,
-      exam_id: history?.exam_id ?? null,
+      exam_id: null,
       user_id: userId,
-      score: Number(history?.score ?? 0),
-      total_marks: Number(history?.total_marks ?? 0),
-      correct_count: Number(history?.correct_count ?? 0),
-      wrong_count: Number(history?.wrong_count ?? 0),
-      skipped_count: Number(history?.skipped_count ?? 0),
-      time_taken: Number(history?.time_taken ?? 0),
-      submitted_at: history?.submitted_at ?? null,
-      created_at: history?.created_at ?? null,
+      score: 0,
+      total_marks: 0,
+      correct_count: 0,
+      wrong_count: 0,
+      skipped_count: 0,
+      time_taken: 0,
+      submitted_at: null,
+      created_at: null,
       details_json: null,
       earned_xp: 0,
       duplicate: true,
