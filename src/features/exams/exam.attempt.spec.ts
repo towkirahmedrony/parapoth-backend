@@ -150,7 +150,12 @@ const createBuilder = (table: string) => {
 
 const fakeSupabase = {
   from: (table: string) => createBuilder(table),
-  rpc: async () => ({ data: null, error: null }),
+  rpc: async (name: string, _args: any) => {
+    if (name === 'consume_quota') {
+      return { data: { allowed: true, limit: 3, used: 1, remaining: 2, reset_at: new Date().toISOString() }, error: null };
+    }
+    return { data: null, error: null };
+  },
 };
 
 const require = createRequire(__filename);
