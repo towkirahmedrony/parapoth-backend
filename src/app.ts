@@ -34,6 +34,7 @@ import growthRoutes from './features/growth/streak.routes';
 import referralRoutes from './features/referral/referral.routes';
 import { contactRoutes } from './features/contact/contact.routes';
 import reportRoutes from './features/reports/reports.routes'; 
+import { accessRoutes } from './features/access/access.routes';
 
 // অ্যাপ-বিল্ডার রাউট ইম্পোর্ট (system থেকে মুভ করা কনফিগারেশনের জন্য)
 import appBuilderRoutes from './features/app-builder/app-builder.routes';
@@ -141,6 +142,7 @@ app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/growth', growthRoutes); 
 app.use('/api/v1/referral', referralRoutes); 
 app.use('/api/v1/contact', contactRoutes);
+app.use('/api/v1/me/access', accessRoutes.userAccess);
 
 // 🛠️ App Builder (configs, home-grids, daily_quote fix)
 app.use('/api/v1/app-builder', appBuilderRoutes);
@@ -148,6 +150,7 @@ app.use('/api/v1/app-builder', appBuilderRoutes);
 // Admin & Management Routes
 app.use('/api/v1/admin/profile', adminProfileRoutes);
 app.use('/api/v1/admin/users', usersAdminRoutes);
+app.use('/api/v1/admin/access', accessRoutes.adminAccess);
 
 // Frontend Compatibility Routes 
 app.use('/content', contentRoutes);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import {
   ATTEMPT_KIND,
@@ -12,11 +13,13 @@ type AnyObject = Record<string, any>;
 
 export class ExamAttemptError extends Error {
   status: number;
+  details?: any;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, details?: any) {
     super(message);
     this.name = 'ExamAttemptError';
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -203,6 +206,23 @@ export class ExamAttemptService {
         throw new ExamAttemptError('Exam attempt has expired', 409);
       }
 
+      // Authoritative quota check for resumes to ensure consistency
+      const { data: quota, error: quotaError } = await supabase.rpc('consume_quota', {
+        p_user_id: userId,
+        p_feature: 'exam_start',
+        p_reference_id: existing.id
+      });
+
+      if (quotaError) throw new Error(quotaError.message);
+      if (!quota.allowed) {
+        throw new ExamAttemptError('Daily free exam limit reached.', 403, {
+          feature: 'exam_start',
+          limit: quota.limit,
+          used: quota.used,
+          reset_at: quota.reset_at
+        });
+      }
+
       return toAttemptDto(existing, now);
     }
 
@@ -216,7 +236,27 @@ export class ExamAttemptService {
       throw new ExamAttemptError('Exam does not define an authoritative duration', 400);
     }
 
+    const attemptId = randomUUID();
+
+    // 1. Authoritative Quota Consumption
+    const { data: quota, error: quotaError } = await supabase.rpc('consume_quota', {
+      p_user_id: userId,
+      p_feature: 'exam_start',
+      p_reference_id: attemptId
+    });
+
+    if (quotaError) throw new Error(quotaError.message);
+    if (!quota.allowed) {
+      throw new ExamAttemptError('Daily free exam limit reached.', 403, {
+        feature: 'exam_start',
+        limit: quota.limit,
+        used: quota.used,
+        reset_at: quota.reset_at
+      });
+    }
+
     const insertPayload = {
+      id: attemptId,
       user_id: userId,
       exam_id: normalizedExamId,
       kind: ATTEMPT_KIND.EXAM,
@@ -237,6 +277,13 @@ export class ExamAttemptService {
       .single();
 
     if (error) {
+      // If insertion failed, refund the quota
+      await supabase.rpc('refund_quota', {
+        p_user_id: userId,
+        p_feature: 'exam_start',
+        p_reference_id: attemptId
+      });
+
       // A concurrent start won the partial unique index; resume that attempt
       // instead of creating a second one.
       if ((error as AnyObject).code === '23505') {

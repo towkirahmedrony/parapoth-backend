@@ -166,7 +166,7 @@ export const approvePayment = async (requestId: string) => {
   // 2. Update Request Status
   const { data: updatedRequest, error: updateError } = await supabase
     .from('payment_requests')
-    .update({ status: 'approved', updated_at: new Date().toISOString() })
+    .update({ status: 'paid', updated_at: new Date().toISOString() })
     .eq('id', requestId)
     .select()
     .single();
@@ -197,7 +197,7 @@ export const rejectPayment = async (requestId: string, reason?: string) => {
   const { data, error } = await supabase
     .from('payment_requests')
     .update({ 
-      status: 'rejected', 
+      status: 'failed', 
       rejection_reason: reason || 'Transaction mismatch or invalid',
       updated_at: new Date().toISOString() 
     })

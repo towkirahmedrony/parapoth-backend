@@ -7,23 +7,23 @@ import { AuditFilterParams } from './content.types';
 
 interface AuthReq extends Request { user?: { id: string } }
 
-export const getStudyMaterials = catchAsync(async (_req: Request, res: Response) => {
-  const materials = await contentService.getStudyMaterials();
+export const getStudyMaterials = catchAsync(async (req: AuthReq, res: Response) => {
+  const materials = await contentService.getStudyMaterials(req.user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Study materials retrieved', data: materials });
 });
 
-export const getTaxonomySubjects = catchAsync(async (req: Request, res: Response) => {
-  const subjects = await contentService.getSubjects();
+export const getTaxonomySubjects = catchAsync(async (req: AuthReq, res: Response) => {
+  const subjects = await contentService.getSubjects(req.user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Subjects retrieved', data: subjects });
 });
 
-export const getTaxonomyChapters = catchAsync(async (req: Request, res: Response) => {
-  const chapters = await contentService.getChapters(req.query.subjectId as string);
+export const getTaxonomyChapters = catchAsync(async (req: AuthReq, res: Response) => {
+  const chapters = await contentService.getChapters(req.query.subjectId as string, req.user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Chapters retrieved', data: chapters });
 });
 
-export const getTaxonomyTopics = catchAsync(async (req: Request, res: Response) => {
-  const topics = await contentService.getTopics(req.query.chapterId as string);
+export const getTaxonomyTopics = catchAsync(async (req: AuthReq, res: Response) => {
+  const topics = await contentService.getTopics(req.query.chapterId as string, req.user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Topics retrieved', data: topics });
 });
 

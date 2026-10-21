@@ -45,9 +45,9 @@ export const getLiveMetrics = async () => {
     supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', startOfTodayIso),
     supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('created_at', startOfYesterdayIso).lt('created_at', startOfTodayIso),
     
-    // Revenue based on approved payment requests
-    supabase.from('payment_requests').select('amount').eq('status', 'approved').gte('updated_at', startOfTodayIso),
-    supabase.from('payment_requests').select('amount').eq('status', 'approved').gte('updated_at', startOfYesterdayIso).lt('updated_at', startOfTodayIso)
+    // Revenue based on paid payment requests
+    supabase.from('payment_requests').select('amount').eq('status', 'paid').gte('updated_at', startOfTodayIso),
+    supabase.from('payment_requests').select('amount').eq('status', 'paid').gte('updated_at', startOfYesterdayIso).lt('updated_at', startOfTodayIso)
   ]);
 
   handleSupabaseError(activeUsersRes.error, 'getLiveMetrics (activeUsers)');

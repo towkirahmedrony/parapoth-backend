@@ -2,26 +2,46 @@ import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams } from './content.types';
 
-export const getStudyMaterials = async () => {
+export const getUserAccess = async (userId: string) => {
+  const { data, error } = await supabase.rpc('get_user_access', { p_user_id: userId });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const applyLocking = (items: any[], hasPremium: boolean) => {
+  return items.map(item => ({
+    ...item,
+    is_locked: item.is_premium && !hasPremium
+  }));
+};
+
+export const getStudyMaterials = async (userId?: string) => {
   const { data, error } = await supabase
     .from('study_materials')
     .select('id, title, title_en, type, is_premium, subject_id, chapter_id, topic_id, media_id, created_at')
     .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
-  return data;
+
+  if (!userId) return applyLocking(data, false);
+  
+  const access = await getUserAccess(userId);
+  return applyLocking(data, !!access.premium);
 };
 
-export const getSubjects = async () => {
+export const getSubjects = async (userId?: string) => {
   const { data, error } = await supabase
     .from('subjects')
     .select('id, name_en, name_bn, is_premium, slug, description, sequence, is_active, icon_url, curriculum_version, language')
     .order('sequence');
 
   if (error) throw new Error(error.message);
-  return data;
+  
+  if (!userId) return applyLocking(data, false);
+  const access = await getUserAccess(userId);
+  return applyLocking(data, !!access.premium);
 };
 
-export const getChapters = async (subjectId?: string) => {
+export const getChapters = async (subjectId?: string, userId?: string) => {
   let query = supabase
     .from('chapters')
     .select('id, name_en, name_bn, subject_id, is_premium, slug, description, sequence, is_active, curriculum_version, language')
@@ -31,10 +51,13 @@ export const getChapters = async (subjectId?: string) => {
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return data;
+  
+  if (!userId) return applyLocking(data, false);
+  const access = await getUserAccess(userId);
+  return applyLocking(data, !!access.premium);
 };
 
-export const getTopics = async (chapterId?: string) => {
+export const getTopics = async (chapterId?: string, userId?: string) => {
   let query = supabase
     .from('topics')
     .select('id, name_en, name_bn, chapter_id, is_premium, slug, sequence, is_active, curriculum_version, language')
@@ -44,7 +67,10 @@ export const getTopics = async (chapterId?: string) => {
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return data;
+  
+  if (!userId) return applyLocking(data, false);
+  const access = await getUserAccess(userId);
+  return applyLocking(data, !!access.premium);
 };
 
 export const buildCurriculumTree = async (): Promise<CurriculumNode[]> => {
