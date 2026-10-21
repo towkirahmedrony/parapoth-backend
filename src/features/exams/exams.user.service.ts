@@ -143,28 +143,17 @@ const sanitizeOptions = (options: any, includeCorrectAnswers = false): any[] => 
   });
 };
 
-const normalizeExplanation = (value: unknown): string | null => {
+const normalizeExplanation = (value: unknown): { bn: string; en: string } | null => {
   if (value === null || value === undefined) return null;
-
-  if (typeof value === 'string') {
-    return value.trim().length > 0 ? value : null;
-  }
 
   if (typeof value === 'object') {
     const explanation = value as AnyObject;
-    const candidate =
-      explanation.text_bn ?? explanation.text ?? explanation.bn ?? explanation.text_en ?? explanation.en;
-
-    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate;
-
-    try {
-      return JSON.stringify(value);
-    } catch {
-      return null;
-    }
+    const bn = typeof explanation.bn === 'string' ? explanation.bn : '';
+    const en = typeof explanation.en === 'string' ? explanation.en : '';
+    return bn || en ? { bn, en } : null;
   }
 
-  return String(value);
+  return null;
 };
 
 const sanitizeMedia = (media: AnyObject | null | undefined) => {

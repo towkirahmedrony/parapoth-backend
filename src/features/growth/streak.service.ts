@@ -1,6 +1,7 @@
 import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { sendRewardNotification } from '../notifications/notifications.service';
+import { localizeRecord, parseLanguage } from '../../lib/utils/language';
 
 export const getStreakStats = async (userId: string) => {
   const { data: profile, error: profileErr } = await supabase.from('profiles').select('current_streak, total_xp, coin_balance, freezes_left').eq('id', userId).single();
@@ -21,9 +22,22 @@ export const getHeatmap = async (userId: string) => {
 };
 
 export const getDailyQuests = async (userId: string) => {
-  const { data, error } = await supabase.from('user_quest_progress').select(`id, is_completed, progress_count, daily_quests ( id, title, target_count, xp_reward, coin_reward, icon_url )`).eq('user_id', userId);
+  const [{ data: profile }, { data, error }] = await Promise.all([
+    supabase.from('profiles').select('language_preference').eq('id', userId).maybeSingle(),
+    supabase.from('user_quest_progress')
+      .select('id, is_completed, progress_count, daily_quests ( id, title, title_en, target_count, xp_reward, coin_reward, icon_url )')
+      .eq('user_id', userId),
+  ]);
   if (error) throw error;
-  return data;
+  const language = parseLanguage(profile?.language_preference);
+  return (data || []).map((progress) => ({
+    ...progress,
+    daily_quests: Array.isArray(progress.daily_quests)
+      ? progress.daily_quests.map((quest) => localizeRecord(quest, language, ['title']))
+      : progress.daily_quests
+        ? localizeRecord(progress.daily_quests, language, ['title'])
+        : null,
+  }));
 };
 
 export const incrementStreakOnExamSubmit = async (userId: string) => {
@@ -52,17 +66,17 @@ export const incrementStreakOnExamSubmit = async (userId: string) => {
       const rules = (configData?.value as any) || {};
 
       let xpReward = rules.daily_login || 10;
-      let notifTitle = "ডেইলি গোল পূরণ! 🎉";
-      let notifBody = `আজকের প্রথম পড়ার জন্য আপনি পেয়েছেন ${xpReward} XP!`;
+      let notifTitle = { bn: 'ডেইলি গোল পূরণ! 🎉', en: 'Daily goal completed! 🎉' };
+      let notifBody = { bn: `আজকের প্রথম পড়ার জন্য আপনি পেয়েছেন ${xpReward} XP!`, en: `You earned ${xpReward} XP for your first study session today.` };
 
       if (newStreak > 0 && newStreak % 30 === 0) {
         xpReward += (rules.streak_30_days || 300);
-        notifTitle = "🔥 ৩০ দিনের ফায়ার স্ট্রিক!";
-        notifBody = `অসাধারণ! টানা ৩০ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`;
+        notifTitle = { bn: '🔥 ৩০ দিনের ফায়ার স্ট্রিক!', en: '🔥 30-day study streak!' };
+        notifBody = { bn: `অসাধারণ! টানা ৩০ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`, en: `Amazing! You earned a total bonus of ${xpReward} XP for studying 30 days in a row.` };
       } else if (newStreak > 0 && newStreak % 7 === 0) {
         xpReward += (rules.streak_7_days || 50);
-        notifTitle = "🔥 ৭ দিনের স্ট্রিক!";
-        notifBody = `দারুণ! টানা ৭ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`;
+        notifTitle = { bn: '🔥 ৭ দিনের স্ট্রিক!', en: '🔥 7-day study streak!' };
+        notifBody = { bn: `দারুণ! টানা ৭ দিন পড়াশোনা করার জন্য বোনাস হিসেবে পেয়েছেন সর্বমোট ${xpReward} XP!`, en: `Great! You earned a total bonus of ${xpReward} XP for studying 7 days in a row.` };
       }
 
       await supabaseAdmin.rpc('update_user_progress', { p_user_id: userId, p_coins: 0, p_xp: xpReward });

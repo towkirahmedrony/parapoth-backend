@@ -41,8 +41,6 @@ export class ProfileValidationError extends Error {
 
 const PHONE_PATTERN = /^\+?[0-9][0-9\s-]{5,19}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const LANGUAGE_PATTERN = /^[a-zA-Z]{2}([-_][a-zA-Z]{2,4})?$/;
-
 const isRealDate = (value: string): boolean => {
   const [year, month, day] = value.split('-').map(Number);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -119,16 +117,9 @@ const profileFields = {
   batch_year: nullableText(20),
   guardian_phone: nullablePhone,
   study_goal: nullableText(200),
-  language_preference: z
-    .union([
-      z
-        .string()
-        .trim()
-        .regex(LANGUAGE_PATTERN, 'Invalid language preference')
-        .max(10),
-      z.null(),
-    ])
-    .optional(),
+  language_preference: z.enum(['bn', 'en'], {
+    errorMap: () => ({ message: "Language preference must be either 'bn' or 'en'" }),
+  }).optional(),
   address: z.union([addressSchema, z.null()]).optional(),
 };
 

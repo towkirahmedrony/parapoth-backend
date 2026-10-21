@@ -3,12 +3,15 @@ import {
   CreatePlanDTO, CreateCouponDTO, CreateAchievementDTO, 
   CreateQuestDTO, ManualOverrideDTO, CreateMarketplaceItemDTO 
 } from './monetization.types';
+import { Language, localizeRecords } from '../../lib/utils/language';
 
 // ================= Plans =================
-export const getPlans = async () => {
-  const { data, error } = await supabase.from('subscription_plans').select('*').order('price', { ascending: true });
+export const getPlans = async (language: Language = 'bn') => {
+  const { data, error } = await supabase.from('subscription_plans')
+    .select('id, name, name_en, features, features_en, duration_days, price, discounted_price, is_active, target_batches')
+    .order('price', { ascending: true });
   if (error) throw error;
-  return data;
+  return localizeRecords(data, language, ['name', 'features']);
 };
 
 export const createPlan = async (payload: CreatePlanDTO) => {
@@ -105,10 +108,21 @@ export const grantManualSubscription = async (payload: ManualOverrideDTO) => {
 };
 
 // ================= Marketplace Items =================
-export const getMarketplaceItems = async () => {
-  const { data, error } = await supabase.from('marketplace_items').select('*').order('created_at', { ascending: false });
+export const getMarketplaceItems = async (language: Language = 'bn') => {
+  const { data, error } = await supabase.from('marketplace_items')
+    .select('id, title, title_en, description, description_en, features, features_en, item_type, price_coins, icon_url, is_active, created_at')
+    .order('created_at', { ascending: false });
   if (error) throw error;
-  return data;
+  return localizeRecords(data, language, ['title', 'description', 'features']);
+};
+
+export const getActiveMarketplaceItems = async (language: Language = 'bn') => {
+  const { data, error } = await supabase.from('marketplace_items')
+    .select('id, title, title_en, description, description_en, features, features_en, item_type, price_coins, icon_url, is_active, created_at')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return localizeRecords(data, language, ['title', 'description', 'features']);
 };
 
 export const createMarketplaceItem = async (payload: CreateMarketplaceItemDTO) => {

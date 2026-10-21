@@ -1,18 +1,19 @@
 import { supabase } from '../../config/supabase';
+import { Language, localizeRecords } from '../../lib/utils/language';
 
 // ==========================================
 // 📱 USER APP SERVICES
 // ==========================================
 
-export const getActivePlans = async () => {
+export const getActivePlans = async (language: Language = 'bn') => {
   const { data, error } = await supabase
     .from('subscription_plans')
-    .select('*')
+    .select('id, name, name_en, features, features_en, duration_days, price, discounted_price, is_active, target_batches')
     .eq('is_active', true)
     .order('price', { ascending: true });
 
   if (error) throw error;
-  return data;
+  return localizeRecords(data, language, ['name', 'features']);
 };
 
 export const getPaymentMethods = async () => {

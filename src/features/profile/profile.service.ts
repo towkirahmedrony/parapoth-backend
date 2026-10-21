@@ -1,5 +1,6 @@
 import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
+import { localizeRecord, parseLanguage } from '../../lib/utils/language';
 import { UserProfile } from './profile.types';
 import { sendRewardNotification } from '../notifications/notifications.service';
 import {
@@ -57,7 +58,13 @@ export class ProfileService {
         const { error: xpErr } = await supabaseAdmin.rpc('update_user_progress', { p_user_id: userId, p_coins: 0, p_xp: xpReward });
         if (!xpErr) {
           // নোটিফিকেশন পাঠানোর ক্ষেত্রে error catch করা হলো যেন মেইন ফ্লো না ভাঙ্গে
-          sendRewardNotification(userId, 'প্রোফাইল সম্পন্ন হয়েছে! 🎉', `আপনার প্রোফাইলে প্রয়োজনীয় তথ্য যুক্ত করার জন্য আপনি পেয়েছেন ${xpReward} XP!`, 0, xpReward).catch(console.error);
+          sendRewardNotification(
+            userId,
+            { bn: 'প্রোফাইল সম্পন্ন হয়েছে! 🎉', en: 'Profile completed! 🎉' },
+            { bn: `আপনার প্রোফাইলে প্রয়োজনীয় তথ্য যুক্ত করার জন্য আপনি পেয়েছেন ${xpReward} XP!`, en: `You earned ${xpReward} XP for completing your profile.` },
+            0,
+            xpReward
+          ).catch(console.error);
         }
       }
     }
@@ -100,9 +107,20 @@ export class ProfileService {
 
   static async getUserBadges(userId: string) {
     // ডাটাবেইজে যদি user_badges টেবিল না থাকে, তবে achievements_master এর রিলেশন দিয়ে একটি ভিউ বা টেবিল বানিয়ে নিতে হবে
-    const { data, error } = await supabase.from('user_badges').select(`earned_at, badge:achievements_master (id, title, description, icon_url, rarity)`).eq('user_id', userId);
+    const [{ data: profile }, { data, error }] = await Promise.all([
+      supabase.from('profiles').select('language_preference').eq('id', userId).maybeSingle(),
+      supabase.from('user_badges').select(`earned_at, badge:achievements_master (id, title, title_en, description, description_en, icon_url, rarity)`).eq('user_id', userId),
+    ]);
     if (error) throw new Error('Failed to fetch user badges');
-    return data;
+    const language = parseLanguage(profile?.language_preference);
+    return (data || []).map((entry) => ({
+      ...entry,
+      badge: Array.isArray(entry.badge)
+        ? entry.badge.map((badge) => localizeRecord(badge, language, ['title', 'description']))
+        : entry.badge
+          ? localizeRecord(entry.badge, language, ['title', 'description'])
+          : null,
+    }));
   }
 
   static async getActivityStats(userId: string) {

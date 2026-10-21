@@ -28,7 +28,7 @@ export interface QuestionPayload {
   source_type?: string | null;
   body: Record<string, any>;
   options: Record<string, any>[];
-  explanation?: string;
+  explanation?: { bn: string; en: string } | null;
   media_id?: string | null;
   explanation_media_id?: string | null;
   tags?: string[];

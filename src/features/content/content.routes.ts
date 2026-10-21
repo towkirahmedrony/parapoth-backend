@@ -10,6 +10,7 @@ import sendResponse from '../../lib/utils/response';
 const router = Router();
 
 router.use(requireAuth);
+router.get('/study-materials', contentController.getStudyMaterials);
 
 // ==========================================
 // 🚀 ADDED: Institutions Route

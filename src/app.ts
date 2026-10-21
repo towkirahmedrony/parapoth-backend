@@ -27,6 +27,7 @@ import historyRoutes from './features/history/history.routes';
 
 // মনিটাইজেশন, প্রগ্রেস, এআই, গ্রোথ, কন্টাক্ট, রিপোর্ট এবং রেফারেল রাউট ইম্পোর্ট
 import monetizationRoutes from './features/monetization/monetization.routes';
+import marketplaceRoutes from './features/monetization/marketplace.routes';
 import progressRoutes from './features/progress/progress.routes'; 
 import aiRoutes from './features/ai/ai.routes'; 
 import growthRoutes from './features/growth/streak.routes'; 
@@ -133,6 +134,7 @@ app.use('/api/v1/finance', financeRoutes);
 app.use('/api/v1/notifications/admin', notificationsAdminRoutes); 
 app.use('/api/v1/notifications', notificationRoutes); 
 app.use('/api/v1/monetization', monetizationRoutes); 
+app.use('/api/v1/marketplace', marketplaceRoutes);
 app.use('/api/v1/history', historyRoutes); 
 app.use('/api/v1/progress', progressRoutes); 
 app.use('/api/v1/ai', aiRoutes); 

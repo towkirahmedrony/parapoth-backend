@@ -4,6 +4,7 @@ import sendResponse from '../../lib/utils/response';
 import { 
   syncVectorEmbeddingsService, 
   chatWithAiService, 
+  explainQuestionWithAiService,
   getAiConfigService, 
   updateAiConfigService 
 } from './ai.service';
@@ -24,13 +25,19 @@ export const syncVectorIndex = catchAsync(async (req: Request, res: Response) =>
 });
 
 export const chatWithAI = catchAsync(async (req: Request, res: Response) => {
-  const { message, sessionId, subjectId } = req.body;
+  const { message, sessionId, subjectId, lang } = req.body;
   const userId = (req as any).user.id;
   
   if (!subjectId) {
     return sendResponse(res, 400, false, 'Subject selection is required');
   }
 
-  const result = await chatWithAiService(userId, sessionId, message, subjectId);
+  const result = await chatWithAiService(userId, sessionId, message, subjectId, lang);
   sendResponse(res, 200, true, 'AI response generated', result);
+});
+
+export const explainQuestion = catchAsync(async (req: Request, res: Response) => {
+  const { question, lang } = req.body;
+  const result = await explainQuestionWithAiService((req as any).user.id, question, lang);
+  sendResponse(res, 200, true, 'AI explanation generated', result);
 });

@@ -2,6 +2,15 @@ import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams } from './content.types';
 
+export const getStudyMaterials = async () => {
+  const { data, error } = await supabase
+    .from('study_materials')
+    .select('id, title, title_en, type, is_premium, subject_id, chapter_id, topic_id, media_id, created_at')
+    .order('created_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data;
+};
+
 export const getSubjects = async () => {
   const { data, error } = await supabase
     .from('subjects')

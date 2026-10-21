@@ -19,27 +19,33 @@ export type Database = {
           condition_type: string | null
           condition_value: Json | null
           description: string | null
+          description_en: string | null
           icon_url: string | null
           id: string
           title: string
+          title_en: string | null
           xp_reward: number | null
         }
         Insert: {
           condition_type?: string | null
           condition_value?: Json | null
           description?: string | null
+          description_en?: string | null
           icon_url?: string | null
           id: string
           title: string
+          title_en?: string | null
           xp_reward?: number | null
         }
         Update: {
           condition_type?: string | null
           condition_value?: Json | null
           description?: string | null
+          description_en?: string | null
           icon_url?: string | null
           id?: string
           title?: string
+          title_en?: string | null
           xp_reward?: number | null
         }
         Relationships: []
@@ -338,6 +344,7 @@ export type Database = {
           is_force_update_required: boolean | null
           key: string
           maintenance_message: string | null
+          maintenance_message_en: string | null
           maintenance_mode: boolean | null
           min_app_version: string | null
           ui_theme_settings: Json | null
@@ -348,6 +355,7 @@ export type Database = {
           is_force_update_required?: boolean | null
           key: string
           maintenance_message?: string | null
+          maintenance_message_en?: string | null
           maintenance_mode?: boolean | null
           min_app_version?: string | null
           ui_theme_settings?: Json | null
@@ -358,6 +366,7 @@ export type Database = {
           is_force_update_required?: boolean | null
           key?: string
           maintenance_message?: string | null
+          maintenance_message_en?: string | null
           maintenance_mode?: boolean | null
           min_app_version?: string | null
           ui_theme_settings?: Json | null
@@ -788,6 +797,7 @@ export type Database = {
           reset_frequency: string | null
           target_count: number
           title: string
+          title_en: string | null
           xp_reward: number | null
         }
         Insert: {
@@ -800,6 +810,7 @@ export type Database = {
           reset_frequency?: string | null
           target_count: number
           title: string
+          title_en?: string | null
           xp_reward?: number | null
         }
         Update: {
@@ -812,6 +823,7 @@ export type Database = {
           reset_frequency?: string | null
           target_count?: number
           title?: string
+          title_en?: string | null
           xp_reward?: number | null
         }
         Relationships: []
@@ -1040,6 +1052,7 @@ export type Database = {
           exam_type: string | null
           id: string
           instructions: string | null
+          instructions_en: string | null
           is_premium: boolean | null
           is_published: boolean | null
           meta_data: Json | null
@@ -1049,7 +1062,9 @@ export type Database = {
           start_time: string | null
           subject_id: string | null
           syllabus_details: string | null
+          syllabus_details_en: string | null
           title: string
+          title_en: string | null
           total_marks: number
           updated_at: string | null
         }
@@ -1063,6 +1078,7 @@ export type Database = {
           exam_type?: string | null
           id: string
           instructions?: string | null
+          instructions_en?: string | null
           is_premium?: boolean | null
           is_published?: boolean | null
           meta_data?: Json | null
@@ -1072,7 +1088,9 @@ export type Database = {
           start_time?: string | null
           subject_id?: string | null
           syllabus_details?: string | null
+          syllabus_details_en?: string | null
           title: string
+          title_en?: string | null
           total_marks: number
           updated_at?: string | null
         }
@@ -1086,6 +1104,7 @@ export type Database = {
           exam_type?: string | null
           id?: string
           instructions?: string | null
+          instructions_en?: string | null
           is_premium?: boolean | null
           is_published?: boolean | null
           meta_data?: Json | null
@@ -1095,7 +1114,9 @@ export type Database = {
           start_time?: string | null
           subject_id?: string | null
           syllabus_details?: string | null
+          syllabus_details_en?: string | null
           title?: string
+          title_en?: string | null
           total_marks?: number
           updated_at?: string | null
         }
@@ -1596,8 +1617,10 @@ export type Database = {
           action_link: string | null
           action_type: string | null
           button_text: string | null
+          button_text_en: string | null
           created_at: string | null
           description: string | null
+          description_en: string | null
           end_date: string | null
           id: string
           image_url: string
@@ -1606,13 +1629,16 @@ export type Database = {
           start_date: string | null
           target_rules: Json | null
           title: string | null
+          title_en: string | null
         }
         Insert: {
           action_link?: string | null
           action_type?: string | null
           button_text?: string | null
+          button_text_en?: string | null
           created_at?: string | null
           description?: string | null
+          description_en?: string | null
           end_date?: string | null
           id?: string
           image_url: string
@@ -1621,13 +1647,16 @@ export type Database = {
           start_date?: string | null
           target_rules?: Json | null
           title?: string | null
+          title_en?: string | null
         }
         Update: {
           action_link?: string | null
           action_type?: string | null
           button_text?: string | null
+          button_text_en?: string | null
           created_at?: string | null
           description?: string | null
+          description_en?: string | null
           end_date?: string | null
           id?: string
           image_url?: string
@@ -1636,6 +1665,7 @@ export type Database = {
           start_date?: string | null
           target_rules?: Json | null
           title?: string | null
+          title_en?: string | null
         }
         Relationships: []
       }
@@ -1826,35 +1856,44 @@ export type Database = {
         Row: {
           created_at: string | null
           description: string
+          description_en: string | null
           features: Json | null
+          features_en: Json | null
           icon_url: string | null
           id: string
           is_active: boolean | null
           item_type: string
           price_coins: number
           title: string
+          title_en: string | null
         }
         Insert: {
           created_at?: string | null
           description: string
+          description_en?: string | null
           features?: Json | null
+          features_en?: Json | null
           icon_url?: string | null
           id?: string
           is_active?: boolean | null
           item_type: string
           price_coins: number
           title: string
+          title_en?: string | null
         }
         Update: {
           created_at?: string | null
           description?: string
+          description_en?: string | null
           features?: Json | null
+          features_en?: Json | null
           icon_url?: string | null
           id?: string
           is_active?: boolean | null
           item_type?: string
           price_coins?: number
           title?: string
+          title_en?: string | null
         }
         Relationships: []
       }
@@ -3011,6 +3050,7 @@ export type Database = {
           media_id: string | null
           subject_id: string | null
           title: string
+          title_en: string | null
           topic_id: string | null
           type: string | null
         }
@@ -3022,6 +3062,7 @@ export type Database = {
           media_id?: string | null
           subject_id?: string | null
           title: string
+          title_en?: string | null
           topic_id?: string | null
           type?: string | null
         }
@@ -3033,6 +3074,7 @@ export type Database = {
           media_id?: string | null
           subject_id?: string | null
           title?: string
+          title_en?: string | null
           topic_id?: string | null
           type?: string | null
         }
@@ -3120,9 +3162,11 @@ export type Database = {
           discounted_price: number | null
           duration_days: number
           features: Json | null
+          features_en: Json | null
           id: string
           is_active: boolean | null
           name: string
+          name_en: string | null
           price: number
           target_batches: Json | null
         }
@@ -3130,9 +3174,11 @@ export type Database = {
           discounted_price?: number | null
           duration_days: number
           features?: Json | null
+          features_en?: Json | null
           id: string
           is_active?: boolean | null
           name: string
+          name_en?: string | null
           price: number
           target_batches?: Json | null
         }
@@ -3140,9 +3186,11 @@ export type Database = {
           discounted_price?: number | null
           duration_days?: number
           features?: Json | null
+          features_en?: Json | null
           id?: string
           is_active?: boolean | null
           name?: string
+          name_en?: string | null
           price?: number
           target_batches?: Json | null
         }

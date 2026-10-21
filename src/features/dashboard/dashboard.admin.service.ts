@@ -78,7 +78,7 @@ export const getActiveExams = async () => {
   // Fetch exams that are published and currently within their start/end time
   const { data: exams, error: examsError } = await supabase
     .from('exam_papers')
-    .select('id, title')
+    .select('id, title, title_en')
     .eq('is_published', true)
     .lte('start_time', nowIso)
     .gte('end_time', nowIso)

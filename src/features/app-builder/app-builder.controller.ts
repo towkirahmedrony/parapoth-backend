@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { AppBuilderService } from './app-builder.service';
+import { parseLanguage } from '../../lib/utils/language';
 import {
   parseBannerCreate,
   parseBannerId,
@@ -98,7 +99,7 @@ export const saveXpRules = async (req: Request, res: Response, next: NextFunctio
 // --- Banners Controllers ---
 export const getBanners = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
-    const data = await AppBuilderService.getBanners();
+    const data = await AppBuilderService.getBanners(parseLanguage(req.query.lang));
     res.status(200).json({ success: true, data });
   } catch (error) { next(error); }
 };

@@ -149,15 +149,10 @@ export const createComprehension = async (data: ComprehensionPayload) => {
 
 export const saveSmartQuestion = async (questionData: QuestionPayload) => {
   const content_hash = generateContentHash(questionData as unknown as Record<string, unknown>);
-  
-  let safeExplanation = questionData.explanation;
-  if (typeof safeExplanation === 'object' && safeExplanation !== null) {
-    safeExplanation = JSON.stringify(safeExplanation);
-  }
 
   const payloadToInsert: TablesInsert<'questions'> = {
     ...(questionData as unknown as TablesInsert<'questions'>),
-    explanation: safeExplanation as string | undefined,
+    explanation: questionData.explanation as unknown as any,
     content_hash,
     status: questionData.status || 'approved',
   };
@@ -172,10 +167,6 @@ export const saveSmartQuestion = async (questionData: QuestionPayload) => {
 
 export const updateQuestion = async (id: string, questionData: Partial<QuestionPayload>) => {
   const safeData: TablesUpdate<'questions'> = { ...(questionData as unknown as TablesUpdate<'questions'>) };
-  
-  if (typeof safeData.explanation === 'object' && safeData.explanation !== null) {
-     safeData.explanation = JSON.stringify(safeData.explanation);
-  }
 
   if (safeData.body || safeData.options || safeData.type || safeData.difficulty_level) {
     const { data: existingData } = await supabase.from('questions').select('body, options, type, difficulty_level').eq('id', id).single();
@@ -219,14 +210,9 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
 
       if (Array.isArray(item.questions)) {
         for (const question of item.questions) {
-          let safeExplanation = question.explanation;
-          if (typeof safeExplanation === 'object' && safeExplanation !== null) {
-            safeExplanation = JSON.stringify(safeExplanation);
-          }
-
           flatQuestionsToInsert.push({
             ...(question as unknown as TablesInsert<'questions'>),
-            explanation: safeExplanation as string | undefined,
+            explanation: question.explanation as unknown as any,
             subject_id: question.subject_id as string || item.subject_id as string,
             chapter_id: question.chapter_id as string || item.chapter_id as string,
             topic_id: question.topic_id as string || item.topic_id as string,
@@ -239,14 +225,9 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
         }
       }
     } else {
-      let safeExplanation = item.explanation;
-      if (typeof safeExplanation === 'object' && safeExplanation !== null) {
-        safeExplanation = JSON.stringify(safeExplanation);
-      }
-
       flatQuestionsToInsert.push({
         ...(item as unknown as TablesInsert<'questions'>),
-        explanation: safeExplanation as string | undefined,
+        explanation: item.explanation as unknown as any,
         status: 'pending',
         is_embedding_stale: true,
         created_by: userId,

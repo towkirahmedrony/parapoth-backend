@@ -1,15 +1,23 @@
 import { supabase } from '../../config/supabase';
+import { Language, parseLanguage } from '../../lib/utils/language';
+
+const notificationText = (language: Language, bn?: string | null, en?: string | null): string => {
+  const preferred = language === 'en' ? en : bn;
+  const fallback = language === 'en' ? bn : en;
+  return preferred?.trim() || fallback?.trim() || '';
+};
 
 export const getUserNotifications = async (userId: string) => {
   // 1. ইউজারের প্রোফাইল ইনফরমেশন নিয়ে আসা
   const { data: profile } = await supabase
     .from('profiles')
-    .select('class_level, subscription_status')
+    .select('class_level, subscription_status, language_preference')
     .eq('id', userId)
     .single();
 
   const classLevel = profile?.class_level || 'all';
   const subStatus = profile?.subscription_status === 'active' ? 'premium' : 'free';
+  const language = parseLanguage(profile?.language_preference);
 
   // 2. সেন্ট (sent) হওয়া সাধারণ নোটিফিকেশনগুলো ফেচ করা
   const { data: notifications, error: notifError } = await supabase
@@ -73,7 +81,11 @@ export const getUserNotifications = async (userId: string) => {
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  return combined;
+  return combined.map((notification) => ({
+    ...notification,
+    title: notificationText(language, notification.title_bn, notification.title_en),
+    body: notificationText(language, notification.body_bn, notification.body_en),
+  }));
 };
 
 export const markNotificationAsRead = async (userId: string, notificationId: string, isClicked: boolean) => {

@@ -2,6 +2,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '../../config/supabase';
 import { extractTextFromJson } from './ai.utils';
 import logger from '../../lib/utils/logger';
+import { parseLanguage } from '../../lib/utils/language';
 
 // Missing Utils implemented locally
 const isNonEmptyString = (text: any): text is string => typeof text === 'string' && text.trim().length > 0;
@@ -66,8 +67,10 @@ export const chatWithAiService = async (
   userId: string,
   sessionId: string | null,
   message: string,
-  subjectId: string
+  subjectId: string,
+  requestedLanguage?: unknown,
 ) => {
+  const language = parseLanguage(requestedLanguage);
   let context = '';
   let subjectName = 'Unknown Subject';
   
@@ -79,7 +82,9 @@ export const chatWithAiService = async (
       .single();
 
     if (subjectData) {
-      subjectName = subjectData.name_en || subjectData.name_bn || 'Unknown Subject';
+      subjectName = language === 'en'
+        ? subjectData.name_en || subjectData.name_bn || 'Unknown Subject'
+        : subjectData.name_bn || subjectData.name_en || 'অজানা বিষয়';
     }
   }
 
@@ -106,6 +111,7 @@ Student Question:
 ${message}
 
 Answer clearly with explanation.
+Respond only in ${language === 'en' ? 'English' : 'Bangla (বাংলা)'}.
 `;
 
   try {
@@ -154,8 +160,47 @@ Answer clearly with explanation.
     logger.error(`CRITICAL AI ERROR: ${error.message}`);
 
     return {
-      reply: 'দুঃখিত, এই মুহূর্তে AI উত্তর দিতে পারছে না। পরে আবার চেষ্টা করুন।',
+      reply: language === 'en'
+        ? 'Sorry, AI is unable to answer right now. Please try again later.'
+        : 'দুঃখিত, এই মুহূর্তে AI উত্তর দিতে পারছে না। পরে আবার চেষ্টা করুন।',
       sessionId: sessionId
+    };
+  }
+};
+
+export const explainQuestionWithAiService = async (
+  userId: string,
+  question: unknown,
+  requestedLanguage?: unknown,
+) => {
+  const language = parseLanguage(requestedLanguage);
+  if (!question || typeof question !== 'object') {
+    throw createHttpError('Question is required', 400);
+  }
+
+  const questionData = question as Record<string, unknown>;
+  const prompt = `
+You are an expert tutor. Explain the following question and its solution clearly.
+Question: ${JSON.stringify(questionData)}
+Respond only in ${language === 'en' ? 'English' : 'Bangla (বাংলা)'}.
+Do not mention internal IDs or database details.
+`;
+
+  try {
+    const config = await getAiConfigService();
+    const model = getGeminiClient().getGenerativeModel({
+      model: MODEL.chat,
+      generationConfig: { temperature: config.temperature || 0.7 },
+    });
+    const result = await model.generateContent(prompt);
+    return { explanation: result.response.text(), lang: language };
+  } catch (err: unknown) {
+    logger.error(`CRITICAL AI EXPLANATION ERROR: ${(err as Error).message}`);
+    return {
+      explanation: language === 'en'
+        ? 'Sorry, an explanation is not available right now.'
+        : 'দুঃখিত, এই মুহূর্তে ব্যাখ্যা পাওয়া যাচ্ছে না।',
+      lang: language,
     };
   }
 };

@@ -7,6 +7,11 @@ import { AuditFilterParams } from './content.types';
 
 interface AuthReq extends Request { user?: { id: string } }
 
+export const getStudyMaterials = catchAsync(async (_req: Request, res: Response) => {
+  const materials = await contentService.getStudyMaterials();
+  sendResponse(res, { statusCode: 200, success: true, message: 'Study materials retrieved', data: materials });
+});
+
 export const getTaxonomySubjects = catchAsync(async (req: Request, res: Response) => {
   const subjects = await contentService.getSubjects();
   sendResponse(res, { statusCode: 200, success: true, message: 'Subjects retrieved', data: subjects });

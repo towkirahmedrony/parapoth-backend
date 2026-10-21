@@ -2,6 +2,11 @@ import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { messaging } from '../../config/firebaseAdmin';
 import { IMarkReadPayload, IDeviceTokenPayload } from './notifications.types';
+import { Language, parseLanguage } from '../../lib/utils/language';
+
+type BilingualCopy = { bn: string; en: string };
+const localizedCopy = (copy: BilingualCopy, language: Language): string =>
+  copy[language]?.trim() || copy[language === 'en' ? 'bn' : 'en']?.trim() || '';
 
 export const getUserNotifications = async (userId: string) => {
   const { data, error } = await supabase
@@ -77,12 +82,14 @@ export const saveUserDeviceToken = async (userId: string, payload: IDeviceTokenP
 // ==========================================
 export const sendPushNotification = async (
   userId: string,
-  title: string,
-  body: string,
+  title: BilingualCopy,
+  body: BilingualCopy,
   imageUrl?: string,
   actionLink?: string
 ) => {
   try {
+    const { data: profile } = await supabaseAdmin.from('profiles').select('language_preference').eq('id', userId).maybeSingle();
+    const language = parseLanguage(profile?.language_preference);
     const { data: userDevices, error } = await supabaseAdmin
       .from('user_devices')
       .select('fcm_token')
@@ -99,8 +106,8 @@ export const sendPushNotification = async (
 
     const message = {
       data: {
-        title: title || 'New Notification',
-        body: body || '',
+        title: localizedCopy(title, language) || 'New Notification',
+        body: localizedCopy(body, language),
         image_url: imageUrl || '',
         action_link: actionLink || '/',
         type: 'general',
@@ -120,8 +127,8 @@ export const sendPushNotification = async (
 // ==========================================
 export const sendRewardNotification = async (
   userId: string,
-  title: string,
-  body: string,
+  title: BilingualCopy,
+  body: BilingualCopy,
   coins: number = 0,
   xp: number = 0
 ) => {
@@ -134,10 +141,10 @@ export const sendRewardNotification = async (
 
     const { error } = await supabaseAdmin.from('notifications').insert({
       target_user_id: userId,
-      title_en: title,
-      title_bn: title,
-      body_en: body,
-      body_bn: body,
+      title_en: title.en,
+      title_bn: title.bn,
+      body_en: body.en,
+      body_bn: body.bn,
       type: 'reward',
       channel: 'in_app',
       meta_data: metadata,

@@ -1,5 +1,6 @@
 import { supabaseAdmin } from '../../config/supabaseAdmin';
 import type { PublicConfigKey } from './app-builder.validation';
+import { Language, localizeRecords } from '../../lib/utils/language';
 
 export const AppBuilderService = {
   // ================== APP CONFIGS (Generic) ==================
@@ -30,7 +31,7 @@ export const AppBuilderService = {
   async getPublicConfig(key: PublicConfigKey) {
     const { data, error } = await supabaseAdmin
       .from('app_configs')
-      .select('key, value')
+      .select('key, value, maintenance_message, maintenance_message_en')
       .eq('key', key)
       .maybeSingle();
 
@@ -51,14 +52,14 @@ export const AppBuilderService = {
   },
 
   // ================== HOME GRIDS ==================
-  async getHomeGrids() {
+  async getHomeGrids(language: Language = 'bn') {
     const { data, error } = await supabaseAdmin
       .from('home_grids')
-      .select('*')
+      .select('*, title_en')
       .order('serial_order', { ascending: true });
     
     if (error) throw error;
-    return data;
+    return localizeRecords(data, language, ['title']);
   },
 
   async saveHomeGrid(gridData: any) {
@@ -94,14 +95,14 @@ export const AppBuilderService = {
   },
 
   // ================== BANNERS ==================
-  async getBanners() {
+  async getBanners(language: Language = 'bn') {
     const { data, error } = await supabaseAdmin
       .from('home_banners')
-      .select('*')
+      .select('id, title, title_en, description, description_en, button_text, button_text_en, image_url, action_link, action_type, sequence, is_active, target_rules, start_date, end_date, created_at')
       .order('sequence', { ascending: true });
     
     if (error) throw error;
-    return data;
+    return localizeRecords(data, language, ['title', 'description', 'button_text']);
   },
 
   async createBanner(bannerData: any) {

@@ -260,7 +260,7 @@ const questions: Row[] = [
       { id: uuid('a'), text_bn: 'ক', text_en: 'A', isCorrect: false },
       { id: uuid('b'), text_bn: 'খ', text_en: 'B', isCorrect: true },
     ],
-    explanation: 'ব্যাখ্যা এক',
+    explanation: { bn: 'ব্যাখ্যা এক', en: 'Explanation one' },
   },
   {
     id: uuid('2'),
@@ -424,7 +424,7 @@ test('submit stores a reviewable snapshot and grades UUID options correctly', as
   assert.equal(firstQuestion.body.text_bn, 'প্রশ্ন এক');
   assert.equal(firstQuestion.options.length, 2);
   assert.equal(firstQuestion.options[1].isCorrect, true);
-  assert.equal(firstQuestion.explanation, 'ব্যাখ্যা এক');
+  assert.deepEqual(firstQuestion.explanation, { bn: 'ব্যাখ্যা এক', en: 'Explanation one' });
 
   assert.equal(detailsJson.details[0].selected_option_text, 'খ');
   assert.equal(detailsJson.details[1].is_correct, true);

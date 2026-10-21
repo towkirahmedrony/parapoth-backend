@@ -9,7 +9,7 @@ export const processStaleEmbeddings = async () => {
   try {
     const { data: staleQuestions, error: fetchError } = await supabase
       .from('questions')
-      .select('id, body, subject_id')
+      .select('id, body, explanation, subject_id')
       .eq('is_embedding_stale', true)
       .limit(12);
 
@@ -24,7 +24,16 @@ export const processStaleEmbeddings = async () => {
 
     for (const question of staleQuestions) {
       try {
-        const textToEmbed = JSON.stringify(question.body);
+        const bodyText = typeof question.body === 'string'
+          ? question.body
+          : JSON.stringify(question.body ?? '');
+        const explanation = question.explanation as { bn?: unknown; en?: unknown } | null;
+        const explanationText = explanation && typeof explanation === 'object'
+          ? [explanation.bn, explanation.en]
+              .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+              .join('\n')
+          : '';
+        const textToEmbed = [bodyText, explanationText].filter(Boolean).join('\n');
         const embeddingVector = await generateVectorEmbedding(textToEmbed);
 
         // 👈 আপডেট: filter_subject_id ডাটাবেস থেকে বাদ দেওয়া হয়েছে 

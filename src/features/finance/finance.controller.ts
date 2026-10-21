@@ -2,11 +2,12 @@ import { Request, Response } from 'express';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import * as financeService from './finance.service';
+import { parseLanguage } from '../../lib/utils/language';
 
 // --- User App Controllers ---
 
 export const getActivePlans = catchAsync(async (req: Request, res: Response) => {
-  const plans = await financeService.getActivePlans();
+  const plans = await financeService.getActivePlans(parseLanguage(req.query.lang));
   sendResponse(res, { statusCode: 200, success: true, message: 'Active plans fetched successfully', data: plans });
 });
 

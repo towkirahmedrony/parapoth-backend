@@ -2,9 +2,10 @@ import { Request, Response } from 'express';
 import * as monetizationService from './monetization.service';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response'; 
+import { parseLanguage } from '../../lib/utils/language';
 
 export const getPlans = catchAsync(async (req: Request, res: Response) => {
-  const plans = await monetizationService.getPlans();
+  const plans = await monetizationService.getPlans(parseLanguage(req.query.lang));
   sendResponse(res, { statusCode: 200, success: true, message: 'Plans fetched successfully', data: plans });
 });
 
@@ -60,7 +61,12 @@ export const grantManualOverride = catchAsync(async (req: Request, res: Response
 
 // ================= Marketplace Items =================
 export const getMarketplaceItems = catchAsync(async (req: Request, res: Response) => {
-  const items = await monetizationService.getMarketplaceItems();
+  const items = await monetizationService.getMarketplaceItems(parseLanguage(req.query.lang));
+  sendResponse(res, { statusCode: 200, success: true, message: 'Marketplace items fetched successfully', data: items });
+});
+
+export const getPublicMarketplaceItems = catchAsync(async (req: Request, res: Response) => {
+  const items = await monetizationService.getActiveMarketplaceItems(parseLanguage(req.query.lang));
   sendResponse(res, { statusCode: 200, success: true, message: 'Marketplace items fetched successfully', data: items });
 });
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { syncVectorIndex, chatWithAI, getAiConfig, updateAiConfig } from './ai.controller';
+import { syncVectorIndex, chatWithAI, explainQuestion, getAiConfig, updateAiConfig } from './ai.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
 
@@ -14,5 +14,6 @@ router.post('/sync-embeddings', requireAuth, rbacGuard(['admin']), syncVectorInd
 
 // Chat (Any logged in user)
 router.post('/chat', requireAuth, chatWithAI);
+router.post('/explanation', requireAuth, explainQuestion);
 
 export default router;
