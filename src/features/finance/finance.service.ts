@@ -162,8 +162,19 @@ export const approvePayment = async (requestId: string) => {
     .single();
 
   if (reqError) throw reqError;
+  if (!request) throw new Error('Payment request not found');
 
-  // 2. Update Request Status
+  // 2. Fetch Plan Details for duration
+  const { data: plan, error: planError } = await supabase
+    .from('subscription_plans')
+    .select('duration_days')
+    .eq('id', request.plan_id)
+    .single();
+
+  if (planError) throw planError;
+  if (!plan) throw new Error('Subscription plan not found');
+
+  // 3. Update Request Status to 'paid'
   const { data: updatedRequest, error: updateError } = await supabase
     .from('payment_requests')
     .update({ status: 'paid', updated_at: new Date().toISOString() })
@@ -173,22 +184,61 @@ export const approvePayment = async (requestId: string) => {
 
   if (updateError) throw updateError;
 
-  // 3. Link SMS Log to this request
-  await supabase
-    .from('payment_sms_logs')
-    .update({ linked_request_id: requestId, status: 'claimed' })
-    .eq('extracted_trx_id', request.trx_id);
+  // 4. Link SMS Log if TRX ID exists
+  if (request.trx_id) {
+    await supabase
+      .from('payment_sms_logs')
+      .update({ linked_request_id: requestId, status: 'claimed' })
+      .eq('extracted_trx_id', request.trx_id);
+  }
 
-  // 4. Assign Plan to User (Assuming you have a 'user_subscriptions' table)
-  // Need to calculate end_date properly based on plan duration in a real app
-  await supabase
+  // 5. Handle User Subscription (Insert or Extend)
+  const now = new Date();
+  const { data: existingSub } = await supabase
     .from('user_subscriptions')
-    .insert([{
-      user_id: request.user_id,
-      plan_id: request.plan_id,
-      status: 'active',
-      start_date: new Date().toISOString()
-    }]);
+    .select('*')
+    .eq('user_id', request.user_id)
+    .eq('status', 'active')
+    .gt('end_date', now.toISOString())
+    .order('end_date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let endDate: Date;
+
+  if (existingSub) {
+    // Extend existing
+    endDate = new Date(existingSub.end_date);
+    endDate.setDate(endDate.getDate() + plan.duration_days);
+    
+    await supabase
+      .from('user_subscriptions')
+      .update({ 
+        end_date: endDate.toISOString(),
+        plan_id: request.plan_id
+      })
+      .eq('id', existingSub.id);
+  } else {
+    // Create new
+    endDate = new Date(now);
+    endDate.setDate(endDate.getDate() + plan.duration_days);
+
+    await supabase
+      .from('user_subscriptions')
+      .insert([{
+        user_id: request.user_id,
+        plan_id: request.plan_id,
+        status: 'active',
+        start_date: now.toISOString(),
+        end_date: endDate.toISOString()
+      }]);
+  }
+
+  // 6. Update Profile Status to premium
+  await supabase
+    .from('profiles')
+    .update({ subscription_status: 'premium' })
+    .eq('id', request.user_id);
 
   return updatedRequest;
 };
