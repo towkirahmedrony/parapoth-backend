@@ -29,8 +29,14 @@ export const autoFetchQuestions = catchAsync(async (req: Request, res: Response)
 });
 
 export const punishUser = catchAsync(async (req: Request, res: Response) => {
-  const result = await ExamAdminService.punishUser(req.body);
-  sendResponse(res, { statusCode: 200, success: true, message: `User punished: ${req.body.action}`, data: result });
+  const adminId = (req as any).user?.id;
+  const result = await ExamAdminService.punishUser(req.body, adminId);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: `User punished: ${req.body?.action}`,
+    data: result,
+  });
 });
 
 export const getLiveProgress = catchAsync(async (req: Request, res: Response) => {
@@ -44,6 +50,15 @@ export const getLeaderboard = catchAsync(async (req: Request, res: Response) => 
 });
 
 export const recoverSession = catchAsync(async (req: Request, res: Response) => {
-  const result = await ExamAdminService.recoverSession(req.body.progressId);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Session recovered', data: result });
+  const adminId = (req as any).user?.id;
+  const progressId = req.body?.progressId ?? req.body?.progress_id ?? req.params?.id;
+  const extendMinutes = req.body?.extend_minutes ?? req.body?.extendMinutes;
+
+  const result = await ExamAdminService.recoverSession(progressId, extendMinutes, adminId);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Attempt extended',
+    data: result,
+  });
 });
