@@ -5,7 +5,7 @@ import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import { AuditFilterParams } from './content.types';
 
-interface AuthReq extends Request { user?: { id: string } }
+interface AuthReq extends Request { user?: { id: string }; userRole?: string }
 
 export const getStudyMaterials = catchAsync(async (req: AuthReq, res: Response) => {
   const materials = await contentService.getStudyMaterials(req.user?.id);
@@ -27,8 +27,9 @@ export const getTaxonomyTopics = catchAsync(async (req: AuthReq, res: Response) 
   sendResponse(res, { statusCode: 200, success: true, message: 'Topics retrieved', data: topics });
 });
 
-export const getCurriculumTree = catchAsync(async (req: Request, res: Response) => {
-  const tree = await contentService.buildCurriculumTree();
+export const getCurriculumTree = catchAsync(async (req: AuthReq, res: Response) => {
+  // The authenticated user decides the lock state of premium nodes.
+  const tree = await contentService.buildCurriculumTree(req.user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Curriculum tree retrieved', data: tree });
 });
 
@@ -49,7 +50,12 @@ export const searchComprehensions = catchAsync(async (req: Request, res: Respons
 });
 
 export const createQuestion = catchAsync(async (req: AuthReq, res: Response) => {
-  const newQuestion = await contentService.saveSmartQuestion({ ...req.body, created_by: req.user?.id });
+  // The role comes from rbacGuard (user_roles), never from the request body,
+  // and the service allow-lists the fields it persists.
+  const newQuestion = await contentService.saveSmartQuestion(req.body, {
+    role: req.userRole,
+    userId: req.user?.id,
+  });
   sendResponse(res, { statusCode: 201, success: true, message: 'Question saved', data: newQuestion });
 });
 
@@ -60,12 +66,16 @@ export const bulkCreateQuestions = catchAsync(async (req: AuthReq, res: Response
     return sendResponse(res, { statusCode: 400, success: false, message: 'Invalid payload: Questions array is required' });
   }
 
-  const result = await questionService.saveBulkQuestions(questions, req.user?.id);
+  const result = await questionService.saveBulkQuestions(questions, req.user?.id, {
+    role: req.userRole,
+  });
   sendResponse(res, { statusCode: 201, success: true, message: `${result.length} questions uploaded successfully`, data: result });
 });
 
-export const updateQuestion = catchAsync(async (req: Request, res: Response) => {
-  const result = await contentService.updateQuestion(req.params.id, req.body);
+export const updateQuestion = catchAsync(async (req: AuthReq, res: Response) => {
+  const result = await contentService.updateQuestion(req.params.id, req.body, {
+    role: req.userRole,
+  });
   sendResponse(res, { statusCode: 200, success: true, message: 'Question updated', data: result });
 });
 

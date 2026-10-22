@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams } from './content.types';
+import { buildQuestionContentHash, decideQuestionWrite } from './question.policy';
+import { buildIdMatchClause, joinOrClauses, normalizeSearchTerm } from '../../lib/utils/search';
 
 export const getUserAccess = async (userId: string) => {
   const { data, error } = await supabase.rpc('get_user_access', { p_user_id: userId });
@@ -73,7 +75,14 @@ export const getTopics = async (chapterId?: string, userId?: string) => {
   return applyLocking(data, !!access.premium);
 };
 
-export const buildCurriculumTree = async (): Promise<CurriculumNode[]> => {
+/**
+ * Full curriculum tree for the user app.
+ *
+ * Premium nodes are marked with `is_locked` using the authoritative access
+ * payload so the client can render the lock state. Access failures fail closed
+ * (locked), never open.
+ */
+export const buildCurriculumTree = async (userId?: string): Promise<CurriculumNode[]> => {
   const [subjectsRes, chaptersRes, topicsRes] = await Promise.all([
     supabase.from('subjects').select('*').order('sequence'),
     supabase.from('chapters').select('*').order('sequence'),
@@ -88,29 +97,46 @@ export const buildCurriculumTree = async (): Promise<CurriculumNode[]> => {
   const chapters = chaptersRes.data ?? [];
   const topics = topicsRes.data ?? [];
 
+  let hasPremium = false;
+  if (userId) {
+    try {
+      const access = await getUserAccess(userId);
+      hasPremium = access?.premium === true;
+    } catch {
+      // Fail closed: an unavailable access check must not unlock content.
+      hasPremium = false;
+    }
+  }
+
+  const withLock = (node: any) => ({ ...node, is_locked: node.is_premium === true && !hasPremium });
+
   const topicsByChapter = topics.reduce((acc: Record<string, any[]>, topic: any) => {
     if (!topic.chapter_id) return acc;
     if (!acc[topic.chapter_id]) acc[topic.chapter_id] = [];
-    acc[topic.chapter_id].push({ ...topic, type: 'topic', children: [] });
+    acc[topic.chapter_id].push(withLock({ ...topic, type: 'topic', children: [] }));
     return acc;
   }, {});
 
   const chaptersBySubject = chapters.reduce((acc: Record<string, any[]>, chapter: any) => {
     if (!chapter.subject_id) return acc;
     if (!acc[chapter.subject_id]) acc[chapter.subject_id] = [];
-    acc[chapter.subject_id].push({
-      ...chapter,
-      type: 'chapter',
-      children: topicsByChapter[chapter.id] || [],
-    });
+    acc[chapter.subject_id].push(
+      withLock({
+        ...chapter,
+        type: 'chapter',
+        children: topicsByChapter[chapter.id] || [],
+      })
+    );
     return acc;
   }, {});
 
-  return subjects.map((subject: any) => ({
-    ...subject,
-    type: 'subject',
-    children: chaptersBySubject[subject.id] || [],
-  }));
+  return subjects.map((subject: any) =>
+    withLock({
+      ...subject,
+      type: 'subject',
+      children: chaptersBySubject[subject.id] || [],
+    })
+  );
 };
 
 const pickAllowedFields = (nodeType: NodeType, rawData: Record<string, any> = {}) => {
@@ -201,29 +227,103 @@ export const searchComprehensions = async (query: string) => {
   return data;
 };
 
-export const saveSmartQuestion = async (questionData: QuestionPayload) => {
-  // 100% Duplicate check based on exact JSON body match
-  const { data: existing } = await supabase
-    .from('questions')
-    .select('id')
-    .eq('subject_id', questionData.subject_id)
-    .contains('body', questionData.body)
-    .limit(1);
+/**
+ * Creates one question on behalf of the authenticated author.
+ *
+ * The request body is never spread into the insert: only author-editable
+ * fields survive (see question.policy), status is forced to `pending` for
+ * non-privileged roles, and `created_by` is taken from the verified token.
+ */
+export const saveSmartQuestion = async (
+  questionData: QuestionPayload,
+  options: { role?: string | null; userId?: string | null } = {}
+) => {
+  const { payload, status } = decideQuestionWrite({
+    role: options.role,
+    body: questionData,
+    mode: 'create',
+  });
 
-  if (existing && existing.length > 0) {
-    throw new Error('100% Duplicate question found. Cannot save.');
+  // Exact duplicate check on the same canonical content hash the bulk path
+  // uses, so both endpoints agree on what "already exists" means.
+  const content_hash = buildQuestionContentHash(payload);
+
+  if (payload.subject_id) {
+    const { data: existing } = await supabase
+      .from('questions')
+      .select('id')
+      .eq('subject_id', payload.subject_id as string)
+      .eq('content_hash', content_hash)
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      throw new Error('100% Duplicate question found. Cannot save.');
+    }
   }
 
-  // Set default status to pending if not provided
-  questionData.status = questionData.status || 'pending';
+  // 100% legacy duplicate check based on exact JSON body match
+  if (payload.body) {
+    const legacyScope = supabase.from('questions').select('id').contains('body', payload.body as any);
 
-  const { data, error } = await supabase.from('questions').insert([questionData]).select().single();
-  if (error) throw new Error(error.message);
-  return data;
+    const { data: legacyExisting } = await (payload.subject_id
+      ? legacyScope.eq('subject_id', payload.subject_id as string)
+      : legacyScope
+    ).limit(1);
+
+    if (legacyExisting && legacyExisting.length > 0) {
+      throw new Error('100% Duplicate question found. Cannot save.');
+    }
+  }
+
+  const insertPayload = {
+    ...payload,
+    content_hash,
+    created_by: options.userId ?? null,
+  };
+
+  const { data, error } = await supabase.from('questions').insert([insertPayload]).select().single();
+  if (error) {
+    if (error.code === '23505') throw new Error('Duplicate question found.');
+    throw new Error(error.message);
+  }
+
+  return { ...data, review_status: status ?? data?.status };
 };
 
-export const updateQuestion = async (id: string, questionData: Partial<QuestionPayload>) => {
-  const { data, error } = await supabase.from('questions').update(questionData).eq('id', id).select().single();
+/**
+ * Updates one question. Non-privileged authors cannot change moderation fields
+ * and any edit to the question body/options/answer returns it to review.
+ */
+export const updateQuestion = async (
+  id: string,
+  questionData: Partial<QuestionPayload>,
+  options: { role?: string | null } = {}
+) => {
+  const { payload } = decideQuestionWrite({
+    role: options.role,
+    body: questionData,
+    mode: 'update',
+  });
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error('No editable fields provided for update');
+  }
+
+  if (
+    payload.body !== undefined ||
+    payload.options !== undefined ||
+    payload.answer !== undefined
+  ) {
+    const { data: existingData } = await supabase
+      .from('questions')
+      .select('subject_id, chapter_id, topic_id, comprehension_id, type, body, options, answer, explanation, difficulty_level, source_type, tags, exam_references, media_id, explanation_media_id')
+      .eq('id', id)
+      .single();
+
+    payload.content_hash = buildQuestionContentHash({ ...(existingData ?? {}), ...payload });
+  }
+
+  const { data, error } = await supabase.from('questions').update(payload).eq('id', id).select().single();
   if (error) throw new Error(error.message);
   return data;
 };
@@ -356,7 +456,20 @@ export const getFilteredQuestions = async (filters: any, page: number = 1, limit
   if (filters.status) query = query.eq('status', filters.status);
   
   if (filters.search) {
-    query = query.or(`id.ilike.%${filters.search}%,body->>text_bn.ilike.%${filters.search}%,body->>text_en.ilike.%${filters.search}%`);
+    // User input is escaped and length-capped before it reaches the filter
+    // language; `id` is a UUID column, so it is matched exactly instead of
+    // with an unsupported ilike.
+    const search = normalizeSearchTerm(filters.search);
+
+    if (search) {
+      const clauses = joinOrClauses([
+        buildIdMatchClause('id', filters.search.trim()),
+        `body->>text_bn.ilike.%${search}%`,
+        `body->>text_en.ilike.%${search}%`,
+      ]);
+
+      query = query.or(clauses);
+    }
   }
 
   const from = (page - 1) * limit;

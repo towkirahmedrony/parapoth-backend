@@ -2,7 +2,8 @@ import { supabase } from '../../config/supabase';
 import { ComprehensionPayload, QuestionPayload } from './content.types';
 import type { TablesInsert, TablesUpdate } from '../../types/database.type';
 import { autoCreateMissingInstitutions } from './institution.service';
-import crypto from 'crypto';
+import { buildQuestionContentHash, decideQuestionWrite } from './question.policy';
+import { buildIdMatchClause, joinOrClauses, normalizeSearchTerm } from '../../lib/utils/search';
 
 export interface QuestionBankFilters {
   subject_id?: string;
@@ -40,10 +41,6 @@ export interface QuestionBankResult {
   stats: QuestionBankStats;
 }
 
-const generateContentHash = (data: Record<string, unknown>) => {
-  return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
-};
-const escapePostgrestLikeValue = (val: string) => val.replace(/[%_\\]/g, '\\$&');
 const hasExplanation = (q: any) => !!q.explanation;
 const hasCorrectAnswer = (q: any) => !!q.options?.some((o: any) => o.is_correct);
 const hasMedia = (q: any) => !!q.media_id || !!q.explanation_media_id;
@@ -78,10 +75,22 @@ const applyQuestionBankFilters = <T extends any>(
   }
 
   if (filters.search) {
-    const search = escapePostgrestLikeValue(filters.search.trim());
+    // Escaped, length-capped input only. `questions.id` is a UUID column, so an
+    // identifier search is an exact match and never an `ilike` pattern.
+    const search = normalizeSearchTerm(filters.search);
+
     if (search) {
       nextQuery = nextQuery.or(
-        [`id.ilike.%${search}%`, `type.ilike.%${search}%`, `difficulty_level.ilike.%${search}%`, `source_type.ilike.%${search}%`, `body->>text_bn.ilike.%${search}%`, `body->>text_en.ilike.%${search}%`, `body->>bn.ilike.%${search}%`, `body->>en.ilike.%${search}%`].join(',')
+        joinOrClauses([
+          buildIdMatchClause('id', filters.search.trim()),
+          `type.ilike.%${search}%`,
+          `difficulty_level.ilike.%${search}%`,
+          `source_type.ilike.%${search}%`,
+          `body->>text_bn.ilike.%${search}%`,
+          `body->>text_en.ilike.%${search}%`,
+          `body->>bn.ilike.%${search}%`,
+          `body->>en.ilike.%${search}%`,
+        ])
       );
     }
   }
@@ -147,15 +156,22 @@ export const createComprehension = async (data: ComprehensionPayload) => {
   return result;
 };
 
-export const saveSmartQuestion = async (questionData: QuestionPayload) => {
-  const content_hash = generateContentHash(questionData as unknown as Record<string, unknown>);
+export const saveSmartQuestion = async (
+  questionData: QuestionPayload,
+  options: { role?: string | null; userId?: string | null } = {}
+) => {
+  const { payload } = decideQuestionWrite({
+    role: options.role,
+    body: questionData,
+    mode: 'create',
+  });
 
   const payloadToInsert: TablesInsert<'questions'> = {
-    ...(questionData as unknown as TablesInsert<'questions'>),
-    explanation: questionData.explanation as unknown as any,
-    content_hash,
-    status: questionData.status || 'approved',
-  };
+    ...(payload as unknown as TablesInsert<'questions'>),
+    explanation: payload.explanation as unknown as any,
+    content_hash: buildQuestionContentHash(payload),
+    created_by: options.userId ?? null,
+  } as TablesInsert<'questions'>;
 
   const { data, error } = await supabase.from('questions').insert(payloadToInsert).select().single();
   if (error) {
@@ -165,17 +181,30 @@ export const saveSmartQuestion = async (questionData: QuestionPayload) => {
   return data;
 };
 
-export const updateQuestion = async (id: string, questionData: Partial<QuestionPayload>) => {
-  const safeData: TablesUpdate<'questions'> = { ...(questionData as unknown as TablesUpdate<'questions'>) };
+export const updateQuestion = async (
+  id: string,
+  questionData: Partial<QuestionPayload>,
+  options: { role?: string | null } = {}
+) => {
+  const { payload } = decideQuestionWrite({
+    role: options.role,
+    body: questionData,
+    mode: 'update',
+  });
 
-  if (safeData.body || safeData.options || safeData.type || safeData.difficulty_level) {
-    const { data: existingData } = await supabase.from('questions').select('body, options, type, difficulty_level').eq('id', id).single();
-    if (existingData) {
-      const mergedData = { ...existingData, ...safeData };
-      safeData.content_hash = generateContentHash(mergedData as Record<string, unknown>);
-    } else {
-      safeData.content_hash = generateContentHash(safeData as Record<string, unknown>);
-    }
+  const safeData: TablesUpdate<'questions'> = { ...(payload as unknown as TablesUpdate<'questions'>) };
+
+  if (safeData.body || safeData.options || safeData.answer || safeData.type || safeData.difficulty_level) {
+    const { data: existingData } = await supabase
+      .from('questions')
+      .select('subject_id, chapter_id, topic_id, comprehension_id, type, body, options, answer, explanation, difficulty_level, source_type, tags, exam_references, media_id, explanation_media_id')
+      .eq('id', id)
+      .single();
+
+    safeData.content_hash = buildQuestionContentHash({
+      ...((existingData as Record<string, unknown>) ?? {}),
+      ...payload,
+    });
   }
 
   const { data, error } = await supabase.from('questions').update(safeData).eq('id', id).select().single();
@@ -189,7 +218,11 @@ export const deleteQuestion = async (id: string) => {
   return true;
 };
 
-export const saveBulkQuestions = async (questionsData: Record<string, unknown>[], userId?: string) => {
+export const saveBulkQuestions = async (
+  questionsData: Record<string, unknown>[],
+  userId?: string,
+  options: { role?: string | null } = {}
+) => {
   try {
     await autoCreateMissingInstitutions(questionsData);
   } catch (error) {
@@ -209,29 +242,45 @@ export const saveBulkQuestions = async (questionsData: Record<string, unknown>[]
       if (compError) throw new Error(compError.message);
 
       if (Array.isArray(item.questions)) {
-        for (const question of item.questions) {
-          flatQuestionsToInsert.push({
-            ...(question as unknown as TablesInsert<'questions'>),
-            explanation: question.explanation as unknown as any,
-            subject_id: question.subject_id as string || item.subject_id as string,
-            chapter_id: question.chapter_id as string || item.chapter_id as string,
-            topic_id: question.topic_id as string || item.topic_id as string,
+        for (const question of item.questions as Record<string, unknown>[]) {
+          const { payload } = decideQuestionWrite({
+            role: options.role,
+            body: question,
+            mode: 'create',
+          });
+
+          const scoped: Record<string, unknown> = {
+            ...payload,
+            subject_id: (question.subject_id as string) || (item.subject_id as string),
+            chapter_id: (question.chapter_id as string) || (item.chapter_id as string),
+            topic_id: (question.topic_id as string) || (item.topic_id as string),
             comprehension_id: compResult.id,
-            status: 'pending',
+          };
+
+          flatQuestionsToInsert.push({
+            ...(scoped as unknown as TablesInsert<'questions'>),
+            explanation: scoped.explanation as unknown as any,
             is_embedding_stale: true,
             created_by: userId,
-            content_hash: generateContentHash(question as Record<string, unknown>),
+            // Same canonicalisation as the single-question path, computed after
+            // the comprehension/scope fields are resolved.
+            content_hash: buildQuestionContentHash(scoped),
           });
         }
       }
     } else {
+      const { payload } = decideQuestionWrite({
+        role: options.role,
+        body: item,
+        mode: 'create',
+      });
+
       flatQuestionsToInsert.push({
-        ...(item as unknown as TablesInsert<'questions'>),
-        explanation: item.explanation as unknown as any,
-        status: 'pending',
+        ...(payload as unknown as TablesInsert<'questions'>),
+        explanation: payload.explanation as unknown as any,
         is_embedding_stale: true,
         created_by: userId,
-        content_hash: generateContentHash(item as Record<string, unknown>),
+        content_hash: buildQuestionContentHash(payload),
       });
     }
   }

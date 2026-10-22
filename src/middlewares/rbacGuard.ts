@@ -45,6 +45,11 @@ export const rbacGuard = (allowedRoles: string[]) => {
         return sendResponse(res, { statusCode: 403, success: false, message: `Forbidden: Access restricted for role '${userRole.role}'` });
       }
 
+      // Attach the verified role so downstream handlers can make
+      // role-dependent decisions (for example the question review workflow)
+      // without trusting a role supplied by the client.
+      req.userRole = userRole.role;
+
       // If authorized, proceed to the next middleware/controller
       next();
     } catch (error) {
