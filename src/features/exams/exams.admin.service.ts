@@ -1,7 +1,17 @@
+import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import logger from '../../lib/utils/logger';
 import { AutoFetchDTO, PunishUserDTO } from './exams.types';
 import { ATTEMPT_STATUS, MINUTE_MS } from './exam.timing';
+import {
+  EXAM_AUTHORING_CATEGORIES,
+  ExamAuthoringError,
+  assertValidExamWindow,
+  parseExamCreatePayload,
+  parseExamUpdatePayload,
+  type ExamAuthoringFields,
+  type ExamAuthoringPatch,
+} from './exam.authoring';
 
 type AnyObject = Record<string, any>;
 
@@ -27,6 +37,92 @@ const secondsRemaining = (deadlineAt: unknown, nowMs = Date.now()): number | nul
   if (Number.isNaN(deadline)) return null;
 
   return Math.max(0, Math.ceil((deadline - nowMs) / 1000));
+};
+
+/**
+ * Server-managed paper columns. These are derived here and never accepted from
+ * the browser (the authoring parser rejects them as unsupported fields).
+ */
+const PAPER_AUTHORED_COLUMNS = [
+  'title',
+  'title_en',
+  'subject_id',
+  'category',
+  'exam_type',
+  'duration_min',
+  'start_time',
+  'end_time',
+  'result_publish_time',
+  'instructions',
+  'instructions_en',
+  'syllabus_details',
+  'syllabus_details_en',
+  'pass_mark',
+  'default_negative_marks',
+  'show_leaderboard',
+  'is_premium',
+] as const;
+
+/**
+ * Questions are eligible for a paper only when a student could actually answer
+ * and have them graded: active, not deleted, and published (the submission path
+ * filters on `status = 'published'`, so anything else would be ungradeable).
+ */
+const requireEligibleQuestions = async (questionIds: string[]): Promise<string[]> => {
+  const { data, error } = await supabase
+    .from('questions')
+    .select('id, status, is_active, deleted_at')
+    .in('id', questionIds);
+
+  if (error) throw new Error(error.message);
+
+  const byId = new Map<string, AnyObject>();
+  (data || []).forEach((row: AnyObject) => byId.set(String(row.id), row));
+
+  const missing = questionIds.filter((questionId) => !byId.has(questionId));
+  const ineligible = questionIds.filter((questionId) => {
+    const row = byId.get(questionId);
+
+    if (!row) return false;
+
+    return !(row.is_active === true && row.status === 'published' && (row.deleted_at ?? null) === null);
+  });
+
+  if (missing.length > 0 || ineligible.length > 0) {
+    throw new ExamAuthoringError(
+      'One or more questions are not available for an exam',
+      400,
+      'VALIDATION_FAILED',
+      {
+        missing_question_ids: missing.slice(0, 25),
+        ineligible_question_ids: ineligible.slice(0, 25),
+      }
+    );
+  }
+
+  return questionIds;
+};
+
+const assertSubjectExists = async (subjectId: string): Promise<void> => {
+  const { data, error } = await supabase
+    .from('subjects')
+    .select('id')
+    .eq('id', subjectId)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  if (!data) throw new ExamAuthoringError('Subject not found');
+};
+
+const countExamQuestions = async (examId: string): Promise<number> => {
+  const { count, error } = await supabase
+    .from('exam_paper_questions')
+    .select('id', { count: 'exact', head: true })
+    .eq('exam_id', examId);
+
+  if (error) throw new Error(error.message);
+
+  return count ?? 0;
 };
 
 export class ExamAdminService {
@@ -108,6 +204,346 @@ export class ExamAdminService {
     const { data, error } = await query;
     if (error) throw new Error(error.message);
     return data;
+  }
+
+  /**
+   * Reference data for the exam wizard: the subjects a paper may belong to and
+   * the categories the create endpoint accepts. Keeping both server-side stops
+   * the UI from offering a subject/category the API will reject.
+   */
+  static async listAuthoringOptions() {
+    const { data, error } = await supabase
+      .from('subjects')
+      .select('id, name_bn, name_en, is_premium')
+      .eq('is_active', true)
+      .order('sequence', { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    return {
+      subjects: (data || []).map((row: AnyObject) => ({
+        id: row.id,
+        name_bn: row.name_bn ?? null,
+        name_en: row.name_en ?? null,
+        is_premium: row.is_premium ?? false,
+      })),
+      categories: [...EXAM_AUTHORING_CATEGORIES],
+    };
+  }
+
+  /**
+   * Published, active questions an administrator may add to a paper.
+   *
+   * This is the authoring view (not the student RPC): it returns the ids the
+   * create/update endpoints will accept, so the wizard cannot offer an
+   * ineligible question and then fail on submit.
+   */
+  static async listEligibleQuestions(params: {
+    subjectId?: unknown;
+    chapterId?: unknown;
+    limit?: unknown;
+  }) {
+    const subjectId = typeof params?.subjectId === 'string' ? params.subjectId.trim() : '';
+
+    if (!subjectId) {
+      throw new ExamAdminError('subject_id is required', 400);
+    }
+
+    const requestedLimit = Number(params?.limit);
+    const limit =
+      Number.isInteger(requestedLimit) && requestedLimit > 0 ? Math.min(requestedLimit, 100) : 50;
+
+    let query = supabase
+      .from('questions')
+      .select('id, body, difficulty_level, type, topic_id, chapter_id')
+      .eq('subject_id', subjectId)
+      .eq('is_active', true)
+      .eq('status', 'published')
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    const chapterId = typeof params?.chapterId === 'string' ? params.chapterId.trim() : '';
+
+    if (chapterId) query = query.eq('chapter_id', chapterId);
+
+    const { data, error } = await query;
+
+    if (error) throw new Error(error.message);
+
+    return (data || []).map((row: AnyObject) => ({
+      id: row.id,
+      body: row.body ?? null,
+      difficulty_level: row.difficulty_level ?? null,
+      type: row.type ?? null,
+      topic_id: row.topic_id ?? null,
+      chapter_id: row.chapter_id ?? null,
+    }));
+  }
+
+  /**
+   * Creates one exam paper with its question associations.
+   *
+   * The paper is inserted unpublished, its questions are linked next, and only
+   * then is `is_published` flipped. If the association insert fails the paper is
+   * deleted again, so no partially-built (or published-but-empty) exam can be
+   * left behind. Supabase exposes no client transaction here, which is why the
+   * compensation step is explicit.
+   */
+  static async createExam(payload: unknown, adminId?: string) {
+    const parsed: ExamAuthoringFields = parseExamCreatePayload(payload);
+
+    await assertSubjectExists(parsed.subject_id);
+
+    const questionIds = await requireEligibleQuestions(parsed.question_ids);
+    const paperId = randomUUID();
+
+    const paperRow: AnyObject = {
+      id: paperId,
+      title: parsed.title,
+      title_en: parsed.title_en,
+      subject_id: parsed.subject_id,
+      category: parsed.category,
+      exam_type: parsed.exam_type,
+      duration_min: parsed.duration_min,
+      start_time: parsed.start_time,
+      end_time: parsed.end_time,
+      result_publish_time: parsed.result_publish_time,
+      instructions: parsed.instructions,
+      instructions_en: parsed.instructions_en,
+      syllabus_details: parsed.syllabus_details,
+      syllabus_details_en: parsed.syllabus_details_en,
+      // Derived server-side: one mark per question.
+      total_marks: questionIds.length,
+      pass_mark: Math.min(parsed.pass_mark, questionIds.length),
+      default_negative_marks: parsed.default_negative_marks,
+      show_leaderboard: parsed.show_leaderboard,
+      is_premium: parsed.is_premium,
+      is_published: false,
+    };
+
+    const { data: created, error: paperError } = await supabase
+      .from('exam_papers')
+      .insert([paperRow])
+      .select()
+      .single();
+
+    if (paperError) throw new Error(paperError.message);
+
+    const { error: linkError } = await supabase.from('exam_paper_questions').insert(
+      questionIds.map((questionId, index) => ({
+        exam_id: paperId,
+        question_id: questionId,
+        sequence: index + 1,
+        marks: 1,
+      }))
+    );
+
+    if (linkError) {
+      const { error: cleanupError } = await supabase.from('exam_papers').delete().eq('id', paperId);
+
+      logger.error('[exam-admin] exam creation rolled back', {
+        paperId,
+        adminId: adminId ?? null,
+        message: linkError.message,
+        cleanupError: cleanupError?.message ?? null,
+      });
+
+      throw new ExamAdminError(
+        'The exam questions could not be saved, so the exam was not created.',
+        500
+      );
+    }
+
+    if (parsed.is_published) {
+      const { error: publishError } = await supabase
+        .from('exam_papers')
+        .update({ is_published: true })
+        .eq('id', paperId);
+
+      if (publishError) {
+        logger.error('[exam-admin] exam created as draft; publish failed', {
+          paperId,
+          adminId: adminId ?? null,
+          message: publishError.message,
+        });
+
+        throw new ExamAdminError(
+          'The exam was saved as a draft because publishing failed. Publish it again from the exam list.',
+          500
+        );
+      }
+    }
+
+    logger.info('[exam-admin] exam created', {
+      paperId,
+      adminId: adminId ?? null,
+      questionCount: questionIds.length,
+      published: parsed.is_published,
+    });
+
+    return {
+      ...(created ?? paperRow),
+      is_published: parsed.is_published,
+      question_count: questionIds.length,
+    };
+  }
+
+  /**
+   * Updates a paper's authored fields and, when `question_ids` is supplied,
+   * replaces its question set.
+   *
+   * Existing associations are captured before the swap so a failed replacement
+   * can be rolled back instead of leaving the paper without questions.
+   */
+  static async updateExam(examId: string, payload: unknown, adminId?: string) {
+    const id = typeof examId === 'string' ? examId.trim() : '';
+
+    if (!id) throw new ExamAdminError('Exam id is required', 400);
+
+    const patch: ExamAuthoringPatch = parseExamUpdatePayload(payload);
+
+    const { data: existing, error: readError } = await supabase
+      .from('exam_papers')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (readError) throw new Error(readError.message);
+    if (!existing) throw new ExamAdminError('Exam not found', 404);
+
+    if (patch.subject_id && patch.subject_id !== existing.subject_id) {
+      await assertSubjectExists(patch.subject_id);
+    }
+
+    assertValidExamWindow(
+      patch.start_time ?? existing.start_time,
+      patch.end_time ?? existing.end_time,
+      'result_publish_time' in patch ? patch.result_publish_time : existing.result_publish_time
+    );
+
+    const replacingQuestions = Array.isArray(patch.question_ids);
+    const nextQuestionIds = replacingQuestions
+      ? await requireEligibleQuestions(patch.question_ids as string[])
+      : null;
+
+    if (replacingQuestions && (nextQuestionIds as string[]).length === 0) {
+      throw new ExamAuthoringError('An exam must keep at least one question');
+    }
+
+    const nextDuration = Number(patch.duration_min ?? existing.duration_min);
+    const nextPublished = patch.is_published ?? existing.is_published === true;
+
+    if (nextPublished) {
+      const finalCount = nextQuestionIds ? nextQuestionIds.length : await countExamQuestions(id);
+
+      if (!Number.isFinite(nextDuration) || nextDuration <= 0) {
+        throw new ExamAdminError('Cannot publish an exam without a valid duration', 400);
+      }
+
+      if (finalCount === 0) {
+        throw new ExamAdminError('Cannot publish an exam without questions', 400);
+      }
+    }
+
+    const update: AnyObject = {};
+
+    for (const column of PAPER_AUTHORED_COLUMNS) {
+      if (column in patch) update[column] = (patch as unknown as AnyObject)[column];
+    }
+
+    if (nextQuestionIds) {
+      update.total_marks = nextQuestionIds.length;
+      update.pass_mark = Math.min(Number(patch.pass_mark ?? existing.pass_mark ?? 0), nextQuestionIds.length);
+    }
+
+    update.is_published = nextPublished;
+
+    let previousLinks: AnyObject[] = [];
+
+    if (nextQuestionIds) {
+      const { data: links, error: linkReadError } = await supabase
+        .from('exam_paper_questions')
+        .select('exam_id, question_id, sequence, marks')
+        .eq('exam_id', id);
+
+      if (linkReadError) throw new Error(linkReadError.message);
+
+      previousLinks = links || [];
+
+      const { error: deleteError } = await supabase
+        .from('exam_paper_questions')
+        .delete()
+        .eq('exam_id', id);
+
+      if (deleteError) throw new Error(deleteError.message);
+
+      const { error: insertError } = await supabase.from('exam_paper_questions').insert(
+        nextQuestionIds.map((questionId, index) => ({
+          exam_id: id,
+          question_id: questionId,
+          sequence: index + 1,
+          marks: 1,
+        }))
+      );
+
+      if (insertError) {
+        if (previousLinks.length > 0) {
+          const { error: restoreError } = await supabase
+            .from('exam_paper_questions')
+            .insert(previousLinks);
+
+          if (restoreError) {
+            logger.error('[exam-admin] question restore failed after update', {
+              examId: id,
+              message: restoreError.message,
+            });
+          }
+        }
+
+        throw new ExamAdminError(
+          'The new question set could not be saved. The previous questions were kept.',
+          500
+        );
+      }
+    }
+
+    const { data: updated, error: updateError } = await supabase
+      .from('exam_papers')
+      .update(update)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) {
+      if (nextQuestionIds && previousLinks.length > 0) {
+        await supabase.from('exam_paper_questions').delete().eq('exam_id', id);
+        const { error: restoreError } = await supabase
+          .from('exam_paper_questions')
+          .insert(previousLinks);
+
+        if (restoreError) {
+          logger.error('[exam-admin] question restore failed after paper update', {
+            examId: id,
+            message: restoreError.message,
+          });
+        }
+      }
+
+      throw new Error(updateError.message);
+    }
+
+    logger.info('[exam-admin] exam updated', {
+      examId: id,
+      adminId: adminId ?? null,
+      replacedQuestions: Boolean(nextQuestionIds),
+      published: nextPublished,
+    });
+
+    return {
+      ...updated,
+      question_count: nextQuestionIds ? nextQuestionIds.length : await countExamQuestions(id),
+    };
   }
 
   /**

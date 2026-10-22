@@ -28,6 +28,63 @@ export const autoFetchQuestions = catchAsync(async (req: Request, res: Response)
   sendResponse(res, { statusCode: 200, success: true, data: result });
 });
 
+/**
+ * Creates an exam paper and its question set.
+ *
+ * Authorisation is enforced by the router (`requireAuth` + `rbacGuard(['admin'])`).
+ * Every security-sensitive field (publication state, total marks, question
+ * associations) is derived server-side by ExamAdminService.
+ */
+export const createExam = catchAsync(async (req: Request, res: Response) => {
+  const adminId = (req as any).user?.id;
+  const result = await ExamAdminService.createExam(req.body, adminId);
+
+  sendResponse(res, {
+    statusCode: 201,
+    success: true,
+    message: result.is_published ? 'Exam created and published' : 'Exam created as a draft',
+    data: result,
+  });
+});
+
+export const updateExam = catchAsync(async (req: Request, res: Response) => {
+  const adminId = (req as any).user?.id;
+  const result = await ExamAdminService.updateExam(req.params.id, req.body, adminId);
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Exam updated',
+    data: result,
+  });
+});
+
+export const getAuthoringOptions = catchAsync(async (_req: Request, res: Response) => {
+  const result = await ExamAdminService.listAuthoringOptions();
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Exam authoring options fetched',
+    data: result,
+  });
+});
+
+export const getEligibleQuestions = catchAsync(async (req: Request, res: Response) => {
+  const result = await ExamAdminService.listEligibleQuestions({
+    subjectId: req.query.subject_id,
+    chapterId: req.query.chapter_id,
+    limit: req.query.limit,
+  });
+
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Eligible questions fetched',
+    data: result,
+  });
+});
+
 export const punishUser = catchAsync(async (req: Request, res: Response) => {
   const adminId = (req as any).user?.id;
   const result = await ExamAdminService.punishUser(req.body, adminId);
