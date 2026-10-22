@@ -7,6 +7,7 @@ import {
   isAttemptExpired,
   resolveAttemptDeadline,
   resolvePracticeDeadline,
+  resolveSubmitGraceMs,
 } from './exam.timing';
 
 type AnyObject = Record<string, any>;
@@ -14,14 +15,37 @@ type AnyObject = Record<string, any>;
 export class ExamAttemptError extends Error {
   status: number;
   details?: any;
+  /** Machine-readable code forwarded to the client for paywall decisions. */
+  code?: string;
+  /**
+   * Error code taken from `details.code`. Callers may set the code through the
+   * details object (the shape the API documents) and the global error handler
+   * still forwards it as a top-level `code`.
+   */
+  errorCode?: string;
 
-  constructor(message: string, status = 400, details?: any) {
+  constructor(message: string, status = 400, details?: any, code?: string) {
     super(message);
     this.name = 'ExamAttemptError';
     this.status = status;
     this.details = details;
+
+    const detailsCode =
+      details && typeof details === 'object' && typeof details.code === 'string'
+        ? details.code
+        : undefined;
+
+    this.code = code ?? detailsCode;
+    this.errorCode = detailsCode ?? code;
   }
 }
+
+/** Error codes the client uses to open the paywall or the result page. */
+export const ATTEMPT_ERROR_CODES = {
+  ALREADY_ATTEMPTED: 'ALREADY_ATTEMPTED',
+  FREE_LIMIT_REACHED: 'FREE_LIMIT_REACHED',
+  PREMIUM_REQUIRED: 'PREMIUM_REQUIRED',
+} as const;
 
 export const ATTEMPT_SELECT =
   'id, user_id, exam_id, kind, status, started_at, deadline_at, submitted_at, answers_draft, current_question_index, time_remaining, last_updated_at, exam_history_id, question_ids';
@@ -78,13 +102,38 @@ const toAttemptDto = (row: AnyObject, nowMs = Date.now()): AttemptDto => ({
 const loadExamPaper = async (examId: string) => {
   const { data, error } = await supabase
     .from('exam_papers')
-    .select('id, is_published, duration_min, start_time, end_time, default_negative_marks, total_marks, result_publish_time')
+    .select('id, is_published, is_premium, duration_min, start_time, end_time, default_negative_marks, total_marks, result_publish_time')
     .eq('id', examId)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
 
   return data;
+};
+
+/**
+ * Authoritative access state for the authenticated user. The service-role
+ * client calls the existing database function; nothing about premium status is
+ * ever taken from the request.
+ */
+export const loadUserAccess = async (userId: string): Promise<AnyObject> => {
+  const { data, error } = await supabase.rpc('get_user_access', { p_user_id: userId });
+
+  if (error) throw new Error(error.message);
+
+  return (data && typeof data === 'object' ? data : {}) as AnyObject;
+};
+
+const assertPremiumContentAccess = (exam: AnyObject, access: AnyObject): void => {
+  if (exam?.is_premium !== true) return;
+  if (access?.premium === true) return;
+
+  throw new ExamAttemptError(
+    'Premium access is required to start this exam.',
+    403,
+    { feature: 'premium_content', resource: 'exam_paper', exam_id: exam?.id ?? null },
+    ATTEMPT_ERROR_CODES.PREMIUM_REQUIRED
+  );
 };
 
 const loadAuthoritativeQuestionIds = async (examId: string): Promise<string[]> => {
@@ -166,6 +215,24 @@ export class ExamAttemptService {
     return data ?? null;
   }
 
+  /**
+   * The result row for a (user, exam) pair, if the student already completed
+   * that exam. A single exam may only be taken once, so its presence blocks a
+   * new attempt even when no in-progress row exists.
+   */
+  static async findHistoryForUserExam(userId: string, examId: string) {
+    const { data, error } = await supabase
+      .from('exam_history')
+      .select('id, user_id, exam_id, status, score')
+      .eq('user_id', userId)
+      .eq('exam_id', normalizeId(examId))
+      .maybeSingle();
+
+    if (error) throw new Error(error.message);
+
+    return data ?? null;
+  }
+
   static async expireAttempt(attemptId: string): Promise<void> {
     try {
       await supabase
@@ -198,6 +265,11 @@ export class ExamAttemptService {
       );
     }
 
+    // Premium papers are authorised server-side. This runs before any attempt
+    // is created or resumed, so a locked paper can never yield a question set
+    // and no quota is consumed for a request that will be rejected.
+    assertPremiumContentAccess(exam, await loadUserAccess(userId));
+
     const existing = await ExamAttemptService.findActiveExamAttempt(userId, normalizedExamId);
 
     if (existing) {
@@ -206,7 +278,9 @@ export class ExamAttemptService {
         throw new ExamAttemptError('Exam attempt has expired', 409);
       }
 
-      // Authoritative quota check for resumes to ensure consistency
+      // Authoritative quota check for resumes to ensure consistency. The
+      // reference id is the persisted attempt id, so the database function
+      // treats the resume as already counted instead of a second start.
       const { data: quota, error: quotaError } = await supabase.rpc('consume_quota', {
         p_user_id: userId,
         p_feature: 'exam_start',
@@ -215,15 +289,34 @@ export class ExamAttemptService {
 
       if (quotaError) throw new Error(quotaError.message);
       if (!quota.allowed) {
-        throw new ExamAttemptError('Daily free exam limit reached.', 403, {
-          feature: 'exam_start',
-          limit: quota.limit,
-          used: quota.used,
-          reset_at: quota.reset_at
-        });
+        throw new ExamAttemptError(
+          'Daily free exam limit reached.',
+          403,
+          {
+            code: ATTEMPT_ERROR_CODES.FREE_LIMIT_REACHED,
+            feature: 'exam_start',
+            limit: quota.limit,
+            used: quota.used,
+            reset_at: quota.reset_at
+          },
+          ATTEMPT_ERROR_CODES.FREE_LIMIT_REACHED
+        );
       }
 
       return toAttemptDto(existing, now);
+    }
+
+    // One attempt per exam. This application-level check runs before questions
+    // are loaded or quota is consumed, so an already-completed exam never costs
+    // the student a free-start credit. The database trigger remains the
+    // authoritative concurrency safeguard (SQLSTATE P0409, handled below).
+    const completed = await ExamAttemptService.findHistoryForUserExam(userId, normalizedExamId);
+
+    if (completed) {
+      throw new ExamAttemptError('You have already taken this exam', 409, {
+        code: ATTEMPT_ERROR_CODES.ALREADY_ATTEMPTED,
+        exam_history_id: completed.id
+      });
     }
 
     const questionIds = await loadAuthoritativeQuestionIds(normalizedExamId);
@@ -247,12 +340,18 @@ export class ExamAttemptService {
 
     if (quotaError) throw new Error(quotaError.message);
     if (!quota.allowed) {
-      throw new ExamAttemptError('Daily free exam limit reached.', 403, {
-        feature: 'exam_start',
-        limit: quota.limit,
-        used: quota.used,
-        reset_at: quota.reset_at
-      });
+      throw new ExamAttemptError(
+        'Daily free exam limit reached.',
+        403,
+        {
+          code: ATTEMPT_ERROR_CODES.FREE_LIMIT_REACHED,
+          feature: 'exam_start',
+          limit: quota.limit,
+          used: quota.used,
+          reset_at: quota.reset_at
+        },
+        ATTEMPT_ERROR_CODES.FREE_LIMIT_REACHED
+      );
     }
 
     const insertPayload = {
@@ -270,19 +369,33 @@ export class ExamAttemptService {
       last_updated_at: toIso(now),
     };
 
-    const { data, error } = await supabase
-      .from('exam_progress')
-      .insert([insertPayload])
-      .select(ATTEMPT_SELECT)
-      .single();
-
-    if (error) {
-      // If insertion failed, refund the quota
-      await supabase.rpc('refund_quota', {
+    // The quota was consumed for `attemptId`; if persisting the attempt fails
+    // for any reason (returned error or thrown transport error) the consumption
+    // is refunded exactly once with the same reference id.
+    const refundConsumedQuota = () =>
+      supabase.rpc('refund_quota', {
         p_user_id: userId,
         p_feature: 'exam_start',
         p_reference_id: attemptId
       });
+
+    let insertResult;
+    try {
+      insertResult = await supabase
+        .from('exam_progress')
+        .insert([insertPayload])
+        .select(ATTEMPT_SELECT)
+        .single();
+    } catch (thrown) {
+      await refundConsumedQuota();
+      throw thrown;
+    }
+
+    const { data, error } = insertResult;
+
+    if (error) {
+      // If insertion failed, refund the quota
+      await refundConsumedQuota();
 
       // A concurrent start won the partial unique index; resume that attempt
       // instead of creating a second one.
@@ -296,6 +409,21 @@ export class ExamAttemptService {
           .maybeSingle();
 
         if (concurrent) return toAttemptDto(concurrent, now);
+      }
+
+      // The database trigger rejected a second attempt because a result
+      // already exists. Report it exactly like the application-level check;
+      // the quota consumed above has already been refunded.
+      if ((error as AnyObject).code === 'P0409') {
+        const existingResult = await ExamAttemptService.findHistoryForUserExam(
+          userId,
+          normalizedExamId
+        ).catch(() => null);
+
+        throw new ExamAttemptError('You have already taken this exam', 409, {
+          code: ATTEMPT_ERROR_CODES.ALREADY_ATTEMPTED,
+          exam_history_id: existingResult?.id ?? null
+        });
       }
 
       throw new Error(error.message);
@@ -427,6 +555,10 @@ export class ExamAttemptService {
   /**
    * Atomically claims an attempt for submission. Only one caller can win; a
    * losing caller receives claimed=false and must return the existing result.
+   *
+   * Submission is the one operation with a grace window: a client that
+   * auto-submits at timer zero may reach the API slightly after `deadline_at`.
+   * Draft saves, resume and start stay strictly deadline-bounded.
    */
   static async claimAttemptForSubmission(
     userId: string,
@@ -441,13 +573,16 @@ export class ExamAttemptService {
       return { attempt, claimed: false };
     }
 
-    if (isAttemptExpired(attempt.deadline_at)) {
+    const graceMs = resolveSubmitGraceMs();
+    const now = Date.now();
+
+    // `isAttemptExpired` is inclusive at the boundary; subtracting the grace is
+    // exactly the same instant the database filter compares against below.
+    if (isAttemptExpired(attempt.deadline_at, now - graceMs)) {
       await ExamAttemptService.expireAttempt(attempt.id);
 
       return { attempt: { ...attempt, status: ATTEMPT_STATUS.EXPIRED }, claimed: false };
     }
-
-    const now = Date.now();
     const { data, error } = await supabase
       .from('exam_progress')
       .update({
@@ -459,7 +594,7 @@ export class ExamAttemptService {
       .eq('id', attempt.id)
       .eq('user_id', userId)
       .eq('status', ATTEMPT_STATUS.IN_PROGRESS)
-      .gt('deadline_at', toIso(now))
+      .gt('deadline_at', toIso(now - graceMs))
       .select(ATTEMPT_SELECT);
 
     if (error) throw new Error(error.message);

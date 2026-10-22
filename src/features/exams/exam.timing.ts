@@ -22,6 +22,39 @@ export type AttemptKind = (typeof ATTEMPT_KIND)[keyof typeof ATTEMPT_KIND];
 
 export const MINUTE_MS = 60_000;
 
+/**
+ * A submission that was started before the deadline can legitimately arrive a
+ * little after it (client timer, network latency, tab throttling). Submission
+ * claiming therefore accepts a short grace window; every other operation
+ * (draft saves, resume, start) stays strictly deadline-bounded.
+ */
+export const DEFAULT_SUBMIT_GRACE_MS = 30_000;
+
+/** Upper bound for an operator-supplied grace, so a typo cannot disable expiry. */
+export const MAX_SUBMIT_GRACE_MS = 10 * MINUTE_MS;
+
+/**
+ * Resolves the submission grace window from configuration.
+ *
+ * An invalid, negative or absurdly large value is ignored in favour of the safe
+ * default instead of failing the request or opening an unbounded window.
+ */
+export const resolveSubmitGraceMs = (raw: unknown = process.env.EXAM_SUBMIT_GRACE_MS): number => {
+  if (raw === null || raw === undefined || String(raw).trim() === '') {
+    return DEFAULT_SUBMIT_GRACE_MS;
+  }
+
+  const parsed = Number(String(raw).trim());
+
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    return DEFAULT_SUBMIT_GRACE_MS;
+  }
+
+  if (parsed > MAX_SUBMIT_GRACE_MS) return DEFAULT_SUBMIT_GRACE_MS;
+
+  return parsed;
+};
+
 /** Conservative default when no arena duration is configured. */
 export const DEFAULT_PRACTICE_DURATION_MIN = 60;
 

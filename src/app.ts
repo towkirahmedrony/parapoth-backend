@@ -44,7 +44,10 @@ dotenv.config();
 const app: Application = express();
 
 // 🚀 [FIX]: প্রক্সি সার্ভার থেকে আসল ইউজারের আইপি রিসিভ করার জন্য এনাবল করা হলো
-app.set('trust proxy', true);
+// Render terminates TLS in front of the app, so exactly one proxy hop is
+// trusted. Trusting an arbitrary chain (`true`) would let a client spoof the
+// left-most X-Forwarded-For entry and defeat IP rate limiting.
+app.set('trust proxy', 1);
 
 /**
  * Browsers serialise `Origin` without a path or trailing slash. Operators,
@@ -60,7 +63,18 @@ const envClientUrls = (process.env.CLIENT_URL ?? '')
   .map(normalizeOrigin)
   .filter(Boolean);
 
-const defaultOrigins = ['https://parapoth-studio.web.app'];
+// Deployed origins come from the two Firebase Hosting projects in the client
+// repositories: the user app (.firebaserc project `parapothexam`, default site)
+// and the admin panel (hosting target `admin` -> site `parapoth-studio`).
+// Firebase serves every site on both `<site>.web.app` and
+// `<project>.firebaseapp.com`, so both spellings of the user app are allowed.
+// Any additional deployment (for example a Vercel preview) must be added to
+// CLIENT_URL instead of widening this list.
+const defaultOrigins = [
+  'https://parapothexam.web.app',
+  'https://parapothexam.firebaseapp.com',
+  'https://parapoth-studio.web.app',
+];
 
 // Local development origins must never widen the production allowlist.
 if (process.env.NODE_ENV !== 'production') {
@@ -171,7 +185,21 @@ interface CustomError extends Error {
   status?: number;
   statusCode?: number;
   code?: string;
+  errorCode?: string;
+  details?: unknown;
 }
+
+/**
+ * Machine-readable codes that clients are allowed to receive. Anything else
+ * (for example a PostgREST code such as `23505` or `PGRST116`) stays internal.
+ */
+const EXPOSED_ERROR_CODES = new Set([
+  'FREE_LIMIT_REACHED',
+  'PREMIUM_REQUIRED',
+  'ALREADY_ATTEMPTED',
+  'PAYMENT_NOT_PENDING',
+  'VALIDATION_FAILED',
+]);
 
 /**
  * A PostgREST error caused by a column/relation the code expects but the
@@ -210,10 +238,24 @@ app.use((err: CustomError, req: Request, res: Response, next: NextFunction) => {
         : 'Internal Server Error'
       : err.message || 'Request failed';
 
+  // Clients gate the paywall and the "already attempted" result link on a
+  // machine-readable code plus its details, so the documented codes are
+  // forwarded at the top level. Every other error keeps the existing
+  // `{success,message,data}` shape, and internal PostgREST codes are never
+  // exposed. 5xx responses never carry application details.
+  const candidateCode =
+    typeof err.errorCode === 'string' ? err.errorCode : typeof err.code === 'string' ? err.code : undefined;
+  const code =
+    candidateCode && EXPOSED_ERROR_CODES.has(candidateCode) ? candidateCode : undefined;
+  const details =
+    statusCode < 500 && err.details !== undefined ? err.details : undefined;
+
   res.status(statusCode).json({
     success: false,
     message,
-    data: null
+    data: null,
+    ...(code ? { code } : {}),
+    ...(details !== undefined ? { details } : {})
   });
 });
 

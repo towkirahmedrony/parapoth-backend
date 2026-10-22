@@ -15,6 +15,7 @@ const state: {
   examPaperQuestions: Row[];
   questions: Row[];
   attempts: Row[];
+  examHistory: Row[];
   progress: Row[];
   updates: Row[];
 } = {
@@ -22,6 +23,7 @@ const state: {
   examPaperQuestions: [],
   questions: [],
   attempts: [],
+  examHistory: [],
   progress: [],
   updates: [],
 };
@@ -80,6 +82,26 @@ const createBuilder = (table: string) => {
 
     if (table === 'exam_progress') {
       if (inserted) {
+        const candidate = inserted[0];
+
+        // Mirrors the live BEFORE INSERT trigger: a second kind='exam' attempt
+        // for a (user, exam) pair that already has a result is rejected with
+        // SQLSTATE P0409.
+        if (
+          candidate?.kind === 'exam' &&
+          candidate?.exam_id &&
+          state.examHistory.some(
+            (history) =>
+              String(history.user_id) === String(candidate.user_id) &&
+              String(history.exam_id) === String(candidate.exam_id)
+          )
+        ) {
+          return {
+            data: null,
+            error: { code: 'P0409', message: 'already_attempted' },
+          };
+        }
+
         seq += 1;
         const row = {
           id: `attempt-${seq}`,
@@ -102,6 +124,17 @@ const createBuilder = (table: string) => {
       }
 
       const rows = state.attempts.filter((item) => matches(item, filters, ranges));
+      return { data: mode === 'single' ? rows[0] ?? null : rows, error: null };
+    }
+
+    if (table === 'exam_history') {
+      if (inserted) {
+        const row = { id: `history-${state.examHistory.length + 1}`, ...inserted[0] };
+        state.examHistory.push(row);
+        return { data: mode === 'single' ? row : [row], error: null };
+      }
+
+      const rows = state.examHistory.filter((item) => matches(item, filters, ranges));
       return { data: mode === 'single' ? rows[0] ?? null : rows, error: null };
     }
 
@@ -148,9 +181,12 @@ const createBuilder = (table: string) => {
   return builder;
 };
 
+const rpcCalls: string[] = [];
+
 const fakeSupabase = {
   from: (table: string) => createBuilder(table),
   rpc: async (name: string, _args: any) => {
+    rpcCalls.push(name);
     if (name === 'consume_quota') {
       return { data: { allowed: true, limit: 3, used: 1, remaining: 2, reset_at: new Date().toISOString() }, error: null };
     }
@@ -187,6 +223,7 @@ const baseExam = (overrides: Row = {}) => ({
 
 beforeEach(() => {
   seq = 0;
+  rpcCalls.length = 0;
   state.examPapers = [baseExam()];
   state.examPaperQuestions = [
     { exam_id: 'exam-1', question_id: 'q-1', sequence: 1 },
@@ -197,6 +234,7 @@ beforeEach(() => {
     { id: 'q-2', is_active: true, status: 'published', deleted_at: null },
   ];
   state.attempts = [];
+  state.examHistory = [];
   state.updates = [];
 });
 
@@ -277,7 +315,8 @@ test('answers cannot be saved once the authoritative deadline has passed', async
 test('an expired attempt cannot be claimed for submission and is never graded', async () => {
   const attempt = await ExamAttemptService.startExamAttempt('user-1', 'exam-1');
 
-  state.attempts[0].deadline_at = new Date(Date.now() - 1).toISOString();
+  // Comfortably beyond the submission grace window, so this is a real expiry.
+  state.attempts[0].deadline_at = new Date(Date.now() - 10 * MINUTE).toISOString();
 
   const claim = await ExamAttemptService.claimAttemptForSubmission(
     'user-1',
@@ -331,17 +370,70 @@ test('concurrent submissions produce exactly one winner', async () => {
   assert.equal(state.attempts[0].status, ATTEMPT_STATUS.SUBMITTED);
 });
 
-test('a finalized attempt is not reopened; a retake is a new attempt', async () => {
+test('a completed exam cannot be started again and consumes no quota', async () => {
   const first = await ExamAttemptService.startExamAttempt('user-1', 'exam-1');
 
   await ExamAttemptService.claimAttemptForSubmission('user-1', first.id, 'history-1');
   await ExamAttemptService.finalizeAttempt(first.id, 'history-1', 30);
 
-  const retake = await ExamAttemptService.startExamAttempt('user-1', 'exam-1');
+  // A result now exists for (user-1, exam-1).
+  state.examHistory.push({
+    id: 'history-1',
+    user_id: 'user-1',
+    exam_id: 'exam-1',
+    status: 'passed',
+    score: 10,
+    attempt_id: first.id,
+  });
 
-  assert.notEqual(retake.id, first.id);
+  const quotaCallsBefore = rpcCalls.filter((name) => name === 'consume_quota').length;
+
+  await assert.rejects(
+    ExamAttemptService.startExamAttempt('user-1', 'exam-1'),
+    (error: any) =>
+      error instanceof ExamAttemptError &&
+      error.status === 409 &&
+      error.errorCode === 'ALREADY_ATTEMPTED' &&
+      error.details?.exam_history_id === 'history-1'
+  );
+
+  // No second attempt row, and no free-start credit was consumed.
+  assert.equal(state.attempts.length, 1);
+  assert.equal(
+    rpcCalls.filter((name) => name === 'consume_quota').length,
+    quotaCallsBefore
+  );
   assert.equal(state.attempts[0].status, ATTEMPT_STATUS.FINALIZED);
-  assert.equal(state.attempts[0].exam_history_id, 'history-1');
+});
+
+test('submission five seconds after the deadline is accepted (grace period)', async () => {
+  const attempt = await ExamAttemptService.startExamAttempt('user-1', 'exam-1');
+
+  state.attempts[0].deadline_at = new Date(Date.now() - 5_000).toISOString();
+
+  const claim = await ExamAttemptService.claimAttemptForSubmission(
+    'user-1',
+    attempt.id,
+    'history-late'
+  );
+
+  assert.equal(claim.claimed, true);
+  assert.equal(state.attempts[0].status, ATTEMPT_STATUS.SUBMITTED);
+});
+
+test('submission after the grace period is rejected with a clean 409', async () => {
+  const attempt = await ExamAttemptService.startExamAttempt('user-1', 'exam-1');
+
+  state.attempts[0].deadline_at = new Date(Date.now() - 60_000).toISOString();
+
+  const claim = await ExamAttemptService.claimAttemptForSubmission(
+    'user-1',
+    attempt.id,
+    'history-too-late'
+  );
+
+  assert.equal(claim.claimed, false);
+  assert.equal(state.attempts[0].status, ATTEMPT_STATUS.EXPIRED);
 });
 
 test('the deadline is inclusive: the exact deadline is allowed, later is expired', () => {
