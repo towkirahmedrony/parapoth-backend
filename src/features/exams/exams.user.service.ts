@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { supabase } from '../../config/supabase';
 import { GenerateExamDTO, SubmitHistoryDTO } from './exams.types';
 import { ATTEMPT_STATUS, isAttemptExpired } from './exam.timing';
-import { ExamAttemptError, ExamAttemptService } from './exam.attempt.service';
+import { ExamAttemptError, ExamAttemptService, loadUserAccess } from './exam.attempt.service';
 import {
   findOptionById,
   isAnswerCorrect,
@@ -55,6 +55,8 @@ const calculateExamXP = async (
 
 const normalizeId = (value: unknown): string => String(value ?? '').trim();
 
+const toIso = (epochMs: number): string => new Date(epochMs).toISOString();
+
 /**
  * Client-supplied idempotency key for a submission.
  *
@@ -93,6 +95,73 @@ const deterministicHistoryId = (userId: string, submissionKey: string): string =
 };
 
 const MAX_TIME_TAKEN_SECONDS = 24 * 60 * 60;
+
+/** Hard cap for an untracked (attempt-less) practice submission. */
+const MAX_UNTRACKED_PRACTICE_QUESTIONS = 100;
+
+/** Upper bound on the candidate pool for randomized question selection. */
+const MAX_QUESTION_CANDIDATES = 500;
+
+const MAX_GENERATE_TOPICS = 50;
+
+const MIN_QUESTION_LIMIT = 1;
+const MAX_QUESTION_LIMIT = 100;
+
+/** Fisher-Yates shuffle; never mutates the caller's array. */
+const shuffleInPlace = <T>(items: T[]): T[] => {
+  for (let index = items.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [items[index], items[swapIndex]] = [items[swapIndex], items[index]];
+  }
+
+  return items;
+};
+
+const clampQuestionLimit = (value: unknown, fallback = 10): number => {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) return fallback;
+
+  return Math.min(Math.max(Math.trunc(numeric), MIN_QUESTION_LIMIT), MAX_QUESTION_LIMIT);
+};
+
+/**
+ * Question ids that belong to an exam paper. Used to stop an untracked practice
+ * submission from harvesting the answer key of live/upcoming exam questions.
+ */
+const findExamPaperQuestionIds = async (questionIds: string[]): Promise<string[]> => {
+  if (questionIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from('exam_paper_questions')
+    .select('question_id')
+    .in('question_id', questionIds);
+
+  if (error) throw new Error(error.message);
+
+  return (data || [])
+    .map((row: AnyObject) => normalizeId(row.question_id))
+    .filter(Boolean);
+};
+
+/** Premium subject ids, used to keep non-premium modes free of locked content. */
+const loadPremiumSubjectIds = async (): Promise<string[]> => {
+  const { data, error } = await supabase.from('subjects').select('id').eq('is_premium', true);
+
+  if (error) return [];
+
+  return (data || []).map((row: AnyObject) => normalizeId(row.id)).filter(Boolean);
+};
+
+const userHasPremiumAccess = async (userId: string): Promise<boolean> => {
+  try {
+    const access = await loadUserAccess(userId);
+
+    return access?.premium === true || access?.unlimited_all === true;
+  } catch {
+    return false;
+  }
+};
 
 const clampTimeTaken = (value: unknown): number => {
   const number = Number(value);
@@ -420,36 +489,196 @@ const loadExamQuestionIds = async (examId: string): Promise<string[]> => {
     .filter(Boolean);
 };
 
-export class ExamUserService {
-  static async generateExam(userId: string, payload: GenerateExamDTO) {
-    if (!userId) throw new Error('Unauthorized');
 
-    const { topics, limit } = payload as any;
+type GroupBattleRequest = {
+  exam_id?: string;
+  id?: string;
+  subject_id?: string;
+  chapter_id?: string;
+  question_count?: number;
+  limit?: number;
+  group_id?: string;
+  title?: string;
+};
 
-    if (!Array.isArray(topics) || topics.length === 0) {
-      throw new Error('Topic list is required');
-    }
+const loadBattleParticipant = async (userId: string) => {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, full_name, current_group_id')
+    .eq('id', userId)
+    .maybeSingle();
 
-    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+  if (error) throw new Error(error.message);
 
-    const { data: questions, error } = await supabase
-      .from('questions')
-      .select(EXAM_QUESTION_SELECT_QUERY)
-      .in('topic_id', topics)
-      .eq('is_active', true)
-      .eq('status', 'published')
-      .is('deleted_at', null)
-      .limit(safeLimit);
+  return data ?? null;
+};
+
+/**
+ * Both participants must belong to the battle's group. Membership is read from
+ * `group_members`; when that read is unavailable the profile's
+ * `current_group_id` is used as a conservative equivalent check.
+ */
+const assertSharedGroupMembership = async (
+  groupId: string,
+  challengerId: string,
+  opponentId: string
+): Promise<void> => {
+  const membershipOf = async (userId: string): Promise<boolean | null> => {
+    const { data, error } = await supabase
+      .from('group_members')
+      .select('id, status')
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) return null;
+
+    return Boolean(data) && data?.status !== 'left' && data?.status !== 'banned';
+  };
+
+  const [challengerMember, opponentMember] = await Promise.all([
+    membershipOf(challengerId),
+    membershipOf(opponentId),
+  ]);
+
+  if (challengerMember === null || opponentMember === null) {
+    const { data: profiles, error } = await supabase
+      .from('profiles')
+      .select('id, current_group_id')
+      .in('id', [challengerId, opponentId]);
 
     if (error) throw new Error(error.message);
 
-    return sanitizeQuestionsForClient(questions || []).sort(() => 0.5 - Math.random());
+    const byId = new Map((profiles || []).map((row: AnyObject) => [normalizeId(row.id), row]));
+
+    const challengerGroup = normalizeId(byId.get(challengerId)?.current_group_id);
+    const opponentGroup = normalizeId(byId.get(opponentId)?.current_group_id);
+
+    if (challengerGroup !== groupId) {
+      throw new ExamAttemptError('You are not a member of this group', 403);
+    }
+
+    if (opponentGroup !== groupId) {
+      throw new ExamAttemptError('Opponent is not a member of this group', 403);
+    }
+
+    return;
+  }
+
+  if (!challengerMember) {
+    throw new ExamAttemptError('You are not a member of this group', 403);
+  }
+
+  if (!opponentMember) {
+    throw new ExamAttemptError('Opponent is not a member of this group', 403);
+  }
+};
+
+/**
+ * Random published, non-premium question ids for a battle paper. The candidate
+ * pool is bounded, shuffled in memory and then truncated.
+ */
+const selectBattleQuestionIds = async (params: {
+  subjectId: string;
+  chapterId: string | null;
+  count: number;
+  userId: string;
+}): Promise<string[]> => {
+  let query = supabase
+    .from('questions')
+    .select('id')
+    .eq('subject_id', params.subjectId)
+    .eq('is_active', true)
+    .eq('status', 'published')
+    .is('deleted_at', null)
+    .limit(MAX_QUESTION_CANDIDATES);
+
+  if (params.chapterId) query = query.eq('chapter_id', params.chapterId);
+
+  if (!(await userHasPremiumAccess(params.userId))) {
+    const premiumSubjectIds = await loadPremiumSubjectIds();
+
+    if (premiumSubjectIds.length > 0) {
+      query = query.not(
+        'subject_id',
+        'in',
+        `(${premiumSubjectIds.map((id) => `"${id}"`).join(',')})`
+      );
+    }
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw new Error(error.message);
+
+  const ids = (data || []).map((row: AnyObject) => normalizeId(row.id)).filter(Boolean);
+
+  return shuffleInPlace(ids).slice(0, params.count);
+};
+
+export class ExamUserService {
+  static async generateExam(userId: string, payload: GenerateExamDTO) {
+    if (!userId) throw new ExamAttemptError('Unauthorized', 401);
+
+    const { topics, limit } = (payload ?? {}) as { topics?: unknown; limit?: unknown };
+
+    if (!Array.isArray(topics) || topics.length === 0) {
+      throw new ExamAttemptError('Topic list is required', 400);
+    }
+
+    if (topics.length > MAX_GENERATE_TOPICS) {
+      throw new ExamAttemptError(`At most ${MAX_GENERATE_TOPICS} topics may be requested`, 400);
+    }
+
+    const normalizedTopics = Array.from(
+      new Set(topics.map((topic) => normalizeId(topic)))
+    ).filter(Boolean);
+
+    if (normalizedTopics.length !== topics.length) {
+      throw new ExamAttemptError('Topic list must contain valid topic ids', 400);
+    }
+
+    const safeLimit = clampQuestionLimit(limit, 10);
+
+    // A bounded candidate pool is shuffled in memory and then truncated. The
+    // pool is deliberately larger than the requested count so repeated requests
+    // do not always return the same first N rows, but never unbounded.
+    let query = supabase
+      .from('questions')
+      .select(EXAM_QUESTION_SELECT_QUERY)
+      .in('topic_id', normalizedTopics)
+      .eq('is_active', true)
+      .eq('status', 'published')
+      .is('deleted_at', null)
+      .limit(MAX_QUESTION_CANDIDATES);
+
+    // Arena/model-test generation is non-premium content: a student without
+    // access must never be served a locked question.
+    if (!(await userHasPremiumAccess(userId))) {
+      const premiumSubjectIds = await loadPremiumSubjectIds();
+
+      if (premiumSubjectIds.length > 0) {
+        query = query.not(
+          'subject_id',
+          'in',
+          `(${premiumSubjectIds.map((id) => `"${id}"`).join(',')})`
+        );
+      }
+    }
+
+    const { data: questions, error } = await query;
+
+    if (error) throw new Error(error.message);
+
+    const candidates = sanitizeQuestionsForClient(questions || []);
+
+    return shuffleInPlace(candidates).slice(0, safeLimit);
   }
 
   static async getArenaQuestions(userId: string, limit: number, subjectSlug?: string) {
-    if (!userId) throw new Error('Unauthorized');
+    if (!userId) throw new ExamAttemptError('Unauthorized', 401);
 
-    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const safeLimit = clampQuestionLimit(limit, 10);
     let subjectId: string | null = null;
 
     if (subjectSlug) {
@@ -481,7 +710,7 @@ export class ExamUserService {
         .eq('is_active', true)
         .eq('status', 'published')
         .is('deleted_at', null)
-        .limit(safeLimit);
+        .limit(MAX_QUESTION_CANDIDATES);
 
       if (subjectId) {
         fallbackQuery = fallbackQuery.eq('subject_id', subjectId);
@@ -493,7 +722,9 @@ export class ExamUserService {
         throw new Error(fallbackError.message);
       }
 
-      return sanitizeQuestionsForClient(fallbackData || []).sort(() => 0.5 - Math.random());
+      // Shuffle the bounded candidate pool before truncating so the arena does
+      // not return the same leading rows on every request.
+      return shuffleInPlace(sanitizeQuestionsForClient(fallbackData || [])).slice(0, safeLimit);
     }
 
     return sanitizeQuestionsForClient(data || []);
@@ -509,7 +740,7 @@ export class ExamUserService {
    * attempt id. The response is an intentional, documented 410.
    */
   static async submitHistory(userId: string, _payload: SubmitHistoryDTO): Promise<never> {
-    if (!userId) throw new Error('Unauthorized');
+    if (!userId) throw new ExamAttemptError('Unauthorized', 401);
 
     throw new ExamAttemptError(
       'This legacy endpoint no longer accepts client-calculated results. Submit through /api/v1/exams/user/submit with a server-issued attempt id.',
@@ -520,7 +751,7 @@ export class ExamUserService {
   static async submitExamResult(payload: SubmitExamPayload) {
     const { session_id, user_id, attempt_id } = payload;
 
-    if (!user_id) throw new Error('Unauthorized');
+    if (!user_id) throw new ExamAttemptError('Unauthorized', 401);
 
     const normalizedExamId = payload.exam_id ? normalizeId(payload.exam_id) : null;
     const answers =
@@ -582,8 +813,29 @@ export class ExamUserService {
         throw new ExamAttemptError('An exam attempt must be started before submitting', 409);
       }
       if (requestedQuestionIds.length === 0) {
-        throw new Error('No questions submitted');
+        throw new ExamAttemptError('No questions submitted', 400);
       }
+
+      if (requestedQuestionIds.length > MAX_UNTRACKED_PRACTICE_QUESTIONS) {
+        throw new ExamAttemptError(
+          `An untracked practice submission may contain at most ${MAX_UNTRACKED_PRACTICE_QUESTIONS} questions`,
+          400
+        );
+      }
+
+      // An untracked submission has no attempt-scoped question set, so it must
+      // not be usable to grade (and therefore reveal the key of) questions that
+      // belong to an exam paper. This runs before any grading or response.
+      const examQuestionIds = await findExamPaperQuestionIds(requestedQuestionIds);
+
+      if (examQuestionIds.length > 0) {
+        throw new ExamAttemptError(
+          'Exam paper questions cannot be submitted outside a tracked attempt',
+          403,
+          { blocked_question_ids: examQuestionIds.slice(0, 10) }
+        );
+      }
+
       questionIds = requestedQuestionIds;
     } else {
       if (attemptQuestionIds.length === 0) {
@@ -651,7 +903,10 @@ export class ExamUserService {
 
       if (!examData || examData.is_published !== true) {
         if (attempt && historyId) await ExamAttemptService.releaseClaim(attempt.id);
-        throw new Error(examData ? 'Exam is not available' : 'Exam not found');
+        throw new ExamAttemptError(
+          examData ? 'Exam is not available' : 'Exam not found',
+          examData ? 403 : 404
+        );
       }
 
       defaultNegativeMarks = Number(examData.default_negative_marks ?? 0.25);
@@ -891,10 +1146,18 @@ export class ExamUserService {
       }
     }
 
-    // XP is computed on the trusted side from authoritative grading and is only
-    // awarded for a tracked attempt this request atomically claimed. Untracked
-    // practice submissions (and every duplicate submission) earn nothing.
-    const earnedXP = attempt ? await calculateExamXP(correct, totalQuestions) : 0;
+    // XP is computed on the trustworthy side from authoritative grading and is
+    // only awarded for a tracked *exam* attempt this request atomically
+    // claimed. Practice attempts, untracked submissions, duplicates and empty
+    // submissions earn nothing (an empty submission must not collect the base
+    // XP award).
+    const answeredCount = answeredQuestionIds.size;
+    const xpEligible =
+      Boolean(attempt) &&
+      attempt?.kind === 'exam' &&
+      answeredCount > 0;
+
+    const earnedXP = xpEligible ? await calculateExamXP(correct, totalQuestions) : 0;
     let xpAwarded = false;
 
     if (earnedXP > 0) {
@@ -1002,7 +1265,7 @@ export class ExamUserService {
    * attempt never receives exam content, and the answer key is never included.
    */
   static async getAttemptQuestions(userId: string, attemptId: string) {
-    if (!userId) throw new Error('Unauthorized');
+    if (!userId) throw new ExamAttemptError('Unauthorized', 401);
 
     const attempt = await ExamAttemptService.getAttempt(userId, attemptId);
 
@@ -1064,7 +1327,7 @@ export class ExamUserService {
 
     const normalizedHistoryId = normalizeId(historyId);
 
-    if (!normalizedHistoryId) throw new Error('Result id is required');
+    if (!normalizedHistoryId) throw new ExamAttemptError('Result id is required', 400);
 
     const { data: record, error } = await supabase
       .from('exam_history')
@@ -1196,68 +1459,187 @@ export class ExamUserService {
   }
 
   /**
-   * Starts a group battle against an EXISTING published exam paper.
+   * Creates a group battle between two students.
    *
-   * Exam papers are never created here: paper authoring and publication are
-   * admin-only (see ExamAdminService). Ownership of the battle comes from the
-   * authenticated challenger, never from the request body.
+   * The battle is authored server-side: the challenger is taken from the
+   * verified token, the opponent must exist and differ from the challenger,
+   * both participants must share the group when a group is in scope, and the
+   * question set is selected from published, non-premium questions. Exam
+   * papers, their question rows and the battle row are written with the
+   * service-role client; browsers cannot write them directly.
+   *
+   * Supabase offers no client-side transaction here, so the steps use explicit
+   * compensation: if the battle row cannot be written, the paper and its
+   * question rows are deleted again. A crash between the final write and the
+   * response can therefore leave a published paper without a battle; such a
+   * paper is inert (no student is enrolled in it) and is reported as a known
+   * limitation rather than claimed as atomic.
    */
   static async createGroupBattleExam(
     challengerId: string,
     opponentId: string,
-    examData: any
+    request: GroupBattleRequest = {}
   ) {
-    if (!challengerId) throw new Error('Unauthorized');
+    if (!challengerId) throw new ExamAttemptError('Unauthorized', 401);
 
     const normalizedOpponentId = normalizeId(opponentId);
 
     if (!normalizedOpponentId) {
-      throw new ExamAttemptError('Opponent id is required', 400);
+      throw new ExamAttemptError('অপোনেন্টের আইডি প্রয়োজন!', 400);
     }
 
     if (challengerId === normalizedOpponentId) {
-      throw new Error('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন না!');
+      throw new ExamAttemptError('আপনি নিজেকে নিজে চ্যালেঞ্জ দিতে পারবেন না!', 400);
     }
 
-    const examId = normalizeId(examData?.exam_id ?? examData?.id);
+    const [challenger, opponent] = await Promise.all([
+      loadBattleParticipant(challengerId),
+      loadBattleParticipant(normalizedOpponentId),
+    ]);
 
-    if (!examId) {
-      throw new ExamAttemptError(
-        'An existing published exam is required to start a group battle',
-        400
+    if (!opponent) {
+      throw new ExamAttemptError('Opponent not found', 404);
+    }
+
+    const requestedGroupId = normalizeId(request?.group_id);
+    // A battle may be scoped to the challenger's current group implicitly; in
+    // that case membership is already established by the profile itself. When
+    // the client names a group explicitly, both participants must belong to it.
+    const groupId = requestedGroupId || normalizeId(challenger?.current_group_id);
+
+    if (requestedGroupId) {
+      await assertSharedGroupMembership(requestedGroupId, challengerId, normalizedOpponentId);
+    }
+
+    const requestedQuestionCount = clampQuestionLimit(
+      request?.question_count ?? request?.limit,
+      10
+    );
+
+    const requestedExamId = normalizeId(request?.exam_id ?? request?.id);
+    const createdPaperByBattle = !requestedExamId;
+    let examId = requestedExamId;
+    let questionIds: string[] = [];
+
+    if (requestedExamId) {
+      // Existing paper: it must be published and every question in it must
+      // still satisfy the publication and premium rules.
+      const { data: exam, error: examError } = await supabase
+        .from('exam_papers')
+        .select('id, is_published, is_premium, category')
+        .eq('id', requestedExamId)
+        .maybeSingle();
+
+      if (examError) throw new Error(examError.message);
+      if (!exam || exam.is_published !== true) {
+        throw new ExamAttemptError('Exam is not available', 403);
+      }
+
+      questionIds = await loadExamQuestionIds(requestedExamId);
+
+      if (questionIds.length === 0) {
+        throw new ExamAttemptError('Exam question set is not configured', 400);
+      }
+    } else {
+      const subjectId = normalizeId(request?.subject_id);
+
+      if (!subjectId) {
+        throw new ExamAttemptError('Subject is required to create a battle', 400);
+      }
+
+      questionIds = await selectBattleQuestionIds({
+        subjectId,
+        chapterId: normalizeId(request?.chapter_id) || null,
+        count: requestedQuestionCount,
+        userId: challengerId,
+      });
+
+      if (questionIds.length < requestedQuestionCount) {
+        throw new ExamAttemptError(
+          'Not enough published non-premium questions for this selection',
+          400,
+          { requested: requestedQuestionCount, available: questionIds.length }
+        );
+      }
+
+      const now = Date.now();
+      const windowEnd = now + 24 * 60 * 60 * 1000;
+      const paperId = crypto.randomUUID();
+      const paperTitle =
+        normalizeId(request?.title) ||
+        `Group battle: ${challenger?.full_name || 'Challenger'} vs ${opponent.full_name || 'Opponent'}`;
+
+      const { error: paperError } = await supabase.from('exam_papers').insert([
+        {
+          id: paperId,
+          title: paperTitle,
+          subject_id: subjectId,
+          category: 'group_battle',
+          is_premium: false,
+          is_published: true,
+          total_marks: questionIds.length,
+          pass_mark: 0,
+          duration_min: 15,
+          default_negative_marks: 0,
+          start_time: toIso(now),
+          end_time: toIso(windowEnd),
+        },
+      ]);
+
+      if (paperError) throw new Error(paperError.message);
+
+      examId = paperId;
+
+      const { error: questionsError } = await supabase.from('exam_paper_questions').insert(
+        questionIds.map((questionId, index) => ({
+          exam_id: paperId,
+          question_id: questionId,
+          sequence: index + 1,
+          marks: 1,
+        }))
       );
+
+      if (questionsError) {
+        // Compensating cleanup: never leave a half-built paper behind.
+        await supabase.from('exam_papers').delete().eq('id', paperId);
+        throw new Error(questionsError.message);
+      }
     }
 
-    const { data: exam, error: examError } = await supabase
-      .from('exam_papers')
-      .select('id, is_published')
-      .eq('id', examId)
-      .maybeSingle();
+    const now = Date.now();
 
-    if (examError) throw new Error(examError.message);
-    if (!exam || exam.is_published !== true) {
-      throw new ExamAttemptError('Exam is not available', 403);
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('current_group_id')
-      .eq('id', challengerId)
-      .maybeSingle();
-
-    const { data, error } = await supabase
+    const { data: battle, error: battleError } = await supabase
       .from('group_battles')
       .insert({
-        exam_id: exam.id,
-        group_id: profile?.current_group_id ?? null,
+        exam_id: examId,
+        group_id: groupId || null,
         initiated_by: challengerId,
         status: 'pending',
+        scores_snapshot: {
+          [challengerId]: 0,
+          [normalizedOpponentId]: 0,
+        },
+        start_time: toIso(now),
+        end_time: toIso(now + 24 * 60 * 60 * 1000),
       })
       .select()
       .single();
 
-    if (error) throw new Error(error.message);
+    if (battleError) {
+      if (createdPaperByBattle && examId) {
+        await supabase.from('exam_paper_questions').delete().eq('exam_id', examId);
+        await supabase.from('exam_papers').delete().eq('id', examId);
+      }
 
-    return data;
+      throw new Error(battleError.message);
+    }
+
+    return {
+      ...battle,
+      exam_id: examId,
+      opponent_id: normalizedOpponentId,
+      question_count: questionIds.length,
+      expires_at: battle?.end_time ?? toIso(now + 24 * 60 * 60 * 1000),
+    };
   }
 }

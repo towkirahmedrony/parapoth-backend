@@ -335,7 +335,11 @@ beforeEach(() => {
   ];
   state.attempts = [];
   state.history = [];
-  state.profiles = [{ id: 'user-1', current_group_id: 'group-1', full_name: 'Student' }];
+  state.profiles = [
+    { id: 'user-1', current_group_id: 'group-1', full_name: 'Student' },
+    // The opponent must exist: battle creation validates both participants.
+    { id: 'user-2', current_group_id: 'group-1', full_name: 'Opponent' },
+  ];
   state.groupBattles = [];
   state.insertedRows = {};
   state.xpAwards = [];
@@ -353,6 +357,62 @@ const submit = async (attemptId: string, overrides: Row = {}) =>
     question_ids: [uuid('1')],
     ...overrides,
   });
+
+test('B4: an untracked submission with more than 100 question ids is rejected', async () => {
+  const questionIds = Array.from({ length: 101 }, (_, index) => uuid(String(index + 200)));
+
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      user_id: 'user-1',
+      answers: {},
+      question_ids: questionIds,
+    }),
+    (error: any) => error.status === 400 && /at most 100/.test(error.message)
+  );
+
+  assert.equal(state.history.length, 0);
+});
+
+test('B4: an untracked submission cannot grade exam-paper questions', async () => {
+  await assert.rejects(
+    ExamUserService.submitExamResult({
+      user_id: 'user-1',
+      answers: { [uuid('1')]: uuid('a') },
+      question_ids: [uuid('1')],
+    }),
+    (error: any) => error.status === 403
+  );
+
+  // No result and therefore no answer-key disclosure for the blocked question.
+  assert.equal(state.history.length, 0);
+});
+
+test('B5: a practice attempt never earns XP', async () => {
+  state.attempts.push({
+    id: 'practice-1',
+    user_id: 'user-1',
+    exam_id: null,
+    kind: 'practice',
+    status: 'in_progress',
+    started_at: new Date(Date.now() - 60_000).toISOString(),
+    deadline_at: new Date(Date.now() + 10 * 60_000).toISOString(),
+    question_ids: [uuid('1')],
+    answers_draft: {},
+    current_question_index: 0,
+    submitted_at: null,
+    exam_history_id: null,
+  });
+
+  const result = await ExamUserService.submitExamResult({
+    attempt_id: 'practice-1',
+    user_id: 'user-1',
+    answers: { [uuid('1')]: uuid('b') },
+    question_ids: [uuid('1')],
+  });
+
+  assert.equal(result.earned_xp, 0);
+  assert.equal(state.xpAwards.length, 0);
+});
 
 test('H-02: a legitimate attempt awards the server-calculated XP exactly once', async () => {
   const attempt = seedAttempt();

@@ -104,6 +104,12 @@ export const processStaleEmbeddings = async () => {
 };
 
 export const startEmbeddingWorker = () => {
-  cron.schedule('*/5 * * * *', processStaleEmbeddings);
+  cron.schedule('*/5 * * * *', () => {
+    // Guard the scheduled body so a failure can only be logged, never become an
+    // unhandled rejection that takes the API process down.
+    void processStaleEmbeddings().catch((error) => {
+      logger.error('Embedding worker run failed:', error);
+    });
+  });
   logger.info('Embedding Background Worker scheduled (runs every 5 minutes).');
 };

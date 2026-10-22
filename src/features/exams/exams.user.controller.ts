@@ -2,14 +2,14 @@ import { Request, Response } from 'express';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import { ExamUserService } from './exams.user.service';
-import { ExamAttemptService } from './exam.attempt.service';
+import { ExamAttemptError, ExamAttemptService } from './exam.attempt.service';
 import { incrementStreakOnExamSubmit } from '../growth/streak.service';
 
 const getAuthUserId = (req: Request): string => {
   const userId = (req as any).user?.id;
 
   if (!userId) {
-    throw new Error('Unauthorized');
+    throw new ExamAttemptError('Unauthorized', 401);
   }
 
   return userId;
@@ -137,9 +137,18 @@ export const submitExam = catchAsync(async (req: Request, res: Response) => {
   });
 
   // A duplicate submission is not a new study event and must not extend the
-  // user's streak.
+  // user's streak. The result is already persisted at this point, so a streak
+  // failure must never turn a successful submission into a 500: it is logged
+  // (without tokens or answer data) and the saved result is returned.
   if (!(result as any)?.duplicate) {
-    await incrementStreakOnExamSubmit(userId);
+    try {
+      await incrementStreakOnExamSubmit(userId);
+    } catch (streakError) {
+      console.error('[exam:streak] failed to update streak after a saved result', {
+        userId,
+        message: streakError instanceof Error ? streakError.message : 'unknown error',
+      });
+    }
   }
 
   sendResponse(res, {
@@ -176,7 +185,7 @@ export const createGroupBattle = catchAsync(async (req: Request, res: Response) 
   const { opponentId, ...examData } = req.body;
 
   if (!opponentId) {
-    throw new Error('অপোনেন্টের আইডি প্রয়োজন!');
+    throw new ExamAttemptError('অপোনেন্টের আইডি প্রয়োজন!', 400);
   }
 
   const result = await ExamUserService.createGroupBattleExam(challengerId, opponentId, examData);

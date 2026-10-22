@@ -40,6 +40,30 @@ export const challengeTrio = catchAsync(async (req: AuthRequest, res: Response) 
   return response(res, { statusCode: 200, success: true, message: 'Battle challenge sent! Waiting for opponents.', data: result });
 });
 
+export const getChallenge = catchAsync(async (req: AuthRequest, res: Response) => {
+  if (!req.user?.id) throw new Error('Unauthorized');
+
+  const data = await userService.getChallenge(req.user.id, req.params.id);
+  return response(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Challenge fetched',
+    data,
+  });
+});
+
+export const submitChallenge = catchAsync(async (req: AuthRequest, res: Response) => {
+  if (!req.user?.id) throw new Error('Unauthorized');
+
+  const data = await userService.submitChallenge(req.user.id, req.params.id, req.body);
+  return response(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Challenge submitted',
+    data,
+  });
+});
+
 export const buzzUser = catchAsync(async (req: AuthRequest, res: Response) => {
   if (!req.user?.id) throw new Error('Unauthorized');
   const { targetUserId } = buzzSchema.parse(req.body);
