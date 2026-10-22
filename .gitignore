@@ -1,5 +1,10 @@
 node_modules/
 dist/
 .env
+.env.*
+!.env.example
 .DS_Store
 npm-debug.log*
+*.bak
+*.bak.*
+src_backup/
