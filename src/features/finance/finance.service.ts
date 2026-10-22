@@ -1,5 +1,39 @@
+import { createRequire } from 'module';
 import { supabase } from '../../config/supabase';
 import { Language, localizeRecords } from '../../lib/utils/language';
+
+const nodeRequire = createRequire(__filename);
+
+/**
+ * Payment state error. `success` is never a database status: a completed
+ * payment is always stored as `paid`, which is also the only value revenue
+ * reporting counts.
+ */
+export class PaymentError extends Error {
+  status: number;
+  code: string;
+
+  constructor(message: string, status = 400, code = 'VALIDATION_FAILED') {
+    super(message);
+    this.name = 'PaymentError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
+const notifyPaymentSuccess = async (
+  userId: string,
+  plan: { name?: string | null; nameEn?: string | null; days?: number | null }
+) => {
+  try {
+    // Loaded lazily (this project compiles to CommonJS) so a Firebase
+    // misconfiguration can never prevent a payment from being recorded.
+    const { sendPaymentSuccessNotification } = nodeRequire('../notifications/notifications.service');
+    await sendPaymentSuccessNotification(userId, plan);
+  } catch (error) {
+    console.error('Payment notification failed:', (error as Error)?.message);
+  }
+};
 
 // ==========================================
 // 📱 USER APP SERVICES
@@ -159,30 +193,43 @@ export const approvePayment = async (requestId: string) => {
     .from('payment_requests')
     .select('*')
     .eq('id', requestId)
-    .single();
+    .maybeSingle();
 
   if (reqError) throw reqError;
-  if (!request) throw new Error('Payment request not found');
+  if (!request) throw new PaymentError('Payment request not found', 404);
+  if (request.status === 'paid') {
+    // Approving twice must never extend the subscription twice.
+    throw new PaymentError('Payment has already been approved', 409, 'PAYMENT_NOT_PENDING');
+  }
+  if (request.status !== 'pending') {
+    throw new PaymentError('Payment is not pending', 409, 'PAYMENT_NOT_PENDING');
+  }
 
   // 2. Fetch Plan Details for duration
   const { data: plan, error: planError } = await supabase
     .from('subscription_plans')
-    .select('duration_days')
+    .select('duration_days, name, name_en')
     .eq('id', request.plan_id)
-    .single();
+    .maybeSingle();
 
   if (planError) throw planError;
-  if (!plan) throw new Error('Subscription plan not found');
+  if (!plan) throw new PaymentError('Subscription plan not found', 404);
 
-  // 3. Update Request Status to 'paid'
-  const { data: updatedRequest, error: updateError } = await supabase
+  // 3. Claim the request atomically: the conditional update makes two
+  //    concurrent approvals (or a retry after the first one committed) safe.
+  const { data: claimed, error: updateError } = await supabase
     .from('payment_requests')
     .update({ status: 'paid', updated_at: new Date().toISOString() })
     .eq('id', requestId)
-    .select()
-    .single();
+    .eq('status', 'pending')
+    .select();
 
   if (updateError) throw updateError;
+  if (!claimed || claimed.length === 0) {
+    throw new PaymentError('Payment is no longer pending', 409, 'PAYMENT_NOT_PENDING');
+  }
+
+  const updatedRequest = claimed[0];
 
   // 4. Link SMS Log if TRX ID exists
   if (request.trx_id) {
@@ -240,10 +287,21 @@ export const approvePayment = async (requestId: string) => {
     .update({ subscription_status: 'premium' })
     .eq('id', request.user_id);
 
+  // 7. Notify the student in both languages. Sent only after the transition to
+  //    `paid` committed, so a rejected or duplicate approval never notifies.
+  await notifyPaymentSuccess(String(request.user_id), {
+    name: plan.name,
+    nameEn: plan.name_en,
+    days: plan.duration_days
+  });
+
   return updatedRequest;
 };
 
 export const rejectPayment = async (requestId: string, reason?: string) => {
+  // Rejecting is only valid while the payment is pending. A paid request must
+  // not be flipped to `failed`, which would leave an active subscription with a
+  // failed payment row.
   const { data, error } = await supabase
     .from('payment_requests')
     .update({ 
@@ -252,11 +310,14 @@ export const rejectPayment = async (requestId: string, reason?: string) => {
       updated_at: new Date().toISOString() 
     })
     .eq('id', requestId)
-    .select()
-    .single();
+    .eq('status', 'pending')
+    .select();
 
   if (error) throw error;
-  return data;
+  if (!data || data.length === 0) {
+    throw new PaymentError('Payment is not pending', 409, 'PAYMENT_NOT_PENDING');
+  }
+  return data[0];
 };
 
 export const getRevenueAnalytics = async () => {

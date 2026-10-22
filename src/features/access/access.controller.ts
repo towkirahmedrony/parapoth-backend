@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import * as accessService from './access.service';
+import { AccessError } from './access.service';
 
 export const getMyAccess = catchAsync(async (req: Request, res: Response) => {
   const userId = (req as any).user.id;
@@ -26,12 +27,22 @@ export const getGrants = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const createGrant = catchAsync(async (req: Request, res: Response) => {
+  // The acting administrator is always the verified token subject, never a
+  // client-supplied id.
   const adminId = (req as any).user.id;
-  const { confirm, ...payload } = req.body;
-  
-  if (payload.scope === 'all' && confirm !== true) {
-    return sendResponse(res, { statusCode: 400, success: false, message: 'Confirmation required for all-users grant' });
+  const { confirm, ...payload } = req.body ?? {};
+
+  // An all-users grant requires an explicit confirmation that the client cannot
+  // skip by omitting the flag. Both the boolean the admin UI sends and the
+  // literal CONFIRM token are accepted.
+  const confirmed = confirm === true || confirm === 'CONFIRM';
+  if (payload.scope === 'all' && !confirmed) {
+    throw new AccessError('Confirmation required for all-users grant');
   }
+
+  // Inside a service-role request auth.uid() is NULL, so the audit fields are
+  // written explicitly from the verified token subject.
+  if (!adminId) throw new AccessError('Administrator identity is required', 401);
 
   const result = await accessService.createGrant(payload, adminId);
   sendResponse(res, { statusCode: 201, success: true, message: 'Grant created', data: result });

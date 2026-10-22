@@ -125,6 +125,60 @@ export const sendPushNotification = async (
 // ==========================================
 // Automated System Notification Helper
 // ==========================================
+/**
+ * Bilingual "payment successful" notification.
+ *
+ * Only sent after the payment row has actually transitioned to `paid`, and it
+ * deliberately contains no transaction id, sender number or amount so payment
+ * credentials never end up in a notification payload. Failures are swallowed:
+ * a notification must never roll back a completed payment.
+ */
+export const sendPaymentSuccessNotification = async (
+  userId: string,
+  plan: { name?: string | null; nameEn?: string | null; days?: number | null } = {}
+) => {
+  try {
+    const planBn = (plan.name || '').trim();
+    const planEn = (plan.nameEn || plan.name || '').trim();
+    const days = Number(plan.days);
+
+    const title: BilingualCopy = {
+      bn: 'পেমেন্ট সফল হয়েছে',
+      en: 'Payment successful',
+    };
+
+    const body: BilingualCopy = {
+      bn: planBn
+        ? `আপনার "${planBn}" প্ল্যান চালু হয়েছে। এখন প্রিমিয়াম সুবিধা ব্যবহার করতে পারবেন।`
+        : 'আপনার প্রিমিয়াম প্ল্যান চালু হয়েছে। এখন প্রিমিয়াম সুবিধা ব্যবহার করতে পারবেন।',
+      en: planEn
+        ? `Your "${planEn}" plan is now active. Premium access is available.`
+        : 'Your premium plan is now active. Premium access is available.',
+    };
+
+    const { error } = await supabaseAdmin.from('notifications').insert({
+      target_user_id: userId,
+      title_bn: title.bn,
+      title_en: title.en,
+      body_bn: body.bn,
+      body_en: body.en,
+      type: 'payment',
+      channel: 'in_app',
+      action_link: '/premium',
+      meta_data: Number.isFinite(days) && days > 0 ? { plan_days: days } : {},
+    });
+
+    if (error) {
+      console.error('❌ Failed to store payment notification:', error.message);
+      return;
+    }
+
+    await sendPushNotification(userId, title, body, undefined, '/premium');
+  } catch (err) {
+    console.error('❌ Payment notification exception:', err);
+  }
+};
+
 export const sendRewardNotification = async (
   userId: string,
   title: BilingualCopy,
