@@ -45,7 +45,7 @@ The trigger records a database-owner bootstrap as an attributed role change when
 
 ## Database migration and historical drift
 
-Prepared migration: [`20261024130000_canonical_rbac_hardening.sql`](../supabase/migrations/20261024130000_canonical_rbac_hardening.sql).
+Applied migration source (renamed to match the live Supabase ledger version; SQL was not rerun): [`20261024075947_canonical_rbac_hardening.sql`](../supabase/migrations/20261024075947_canonical_rbac_hardening.sql).
 
 It is forward-only and transactional. It adds role checks and the active-role index; seeds canonical permissions without deleting existing mappings; creates `has_permission`, protected `assign_user_role` and `set_role_permission` RPCs; tightens `is_admin`; creates append-only-for-application-roles `security_audit_logs` and `admin_auth_sessions`; adds role/permission/audit mirror triggers; revokes direct role and audit-log DML from application/service API roles; and creates role-change, session registration/revocation, logout, and account-status RPCs. Security-definer functions use an empty fixed `search_path`, fully qualified objects, caller identity checks, and explicit execute grants. Audit records avoid tokens and copy no legacy `details` payload into the security log.
 
@@ -93,7 +93,7 @@ Caller-scoped RPC clients require `SUPABASE_URL` and `SUPABASE_ANON_KEY` plus th
 
 ## Post-deployment verification and remaining actions
 
-The migration is applied and recorded as `20261024075947`. Read-only checks verified the role assignments remain 1 Admin, 2 Students, and 0 Super Admins; the permission-map counts are present; both security tables have RLS enabled; and all seven caller-authorized RPCs have fixed empty `search_path`, authenticated execute grants, and no service-role execute grant. Backend CI completed successfully. Student frontend CI was still running at the last check; the admin repository returned no GitHub Actions run. The local backend test/build, admin build, student build, and legacy-server type check had passed before the `main` pushes.
+The migration is applied and recorded as `20261024075947`; its checked-in filename now matches that ledger version to avoid treating an already-applied migration as pending. The rename changed no SQL and no database command was run. Read-only checks verified the role assignments remain 1 Admin, 2 Students, and 0 Super Admins; the permission-map counts are present; both security tables have RLS enabled; and all seven caller-authorized RPCs have fixed empty `search_path`, authenticated execute grants, and no service-role execute grant. Backend and student frontend CI completed successfully. The admin repository returned no GitHub Actions run. The local backend test/build, admin build, student build, and legacy-server type check had passed before the `main` pushes.
 
 The security advisor reports existing project findings, including two pre-existing functions with mutable search paths and disabled leaked-password protection; these were not changed by this RBAC release. It also reports expected authenticated-executable SECURITY DEFINER RPC warnings—the new RPCs perform explicit caller/role checks and are not executable by `service_role`. Performance advice includes many unindexed foreign keys across the existing schema and two new session-table foreign keys; no additional index migration was included in this release.
 
