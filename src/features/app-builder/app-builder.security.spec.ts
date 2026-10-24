@@ -7,13 +7,16 @@ import type { Server } from 'node:http';
 
 type Row = Record<string, any>;
 
+const ADMIN_SESSION_ID = '00000000-0000-4000-8000-000000000002';
+const ADMIN_TOKEN = `e30.${Buffer.from(JSON.stringify({ session_id: ADMIN_SESSION_ID })).toString('base64url')}.test`;
+
 const roles: Record<string, string> = {
   'admin-1': 'admin',
   'student-1': 'student',
 };
 
 const usersByToken: Record<string, string> = {
-  'admin-token': 'admin-1',
+  [ADMIN_TOKEN]: 'admin-1',
   'student-token': 'student-1',
 };
 
@@ -21,9 +24,11 @@ const state: {
   writes: Row[];
   reads: Row[];
   configs: Record<string, Row>;
+  sessionRevoked: boolean;
 } = {
   writes: [],
   reads: [],
+  sessionRevoked: false,
   configs: {
     xp_rules: { key: 'xp_rules', value: { per_correct_answer: 5 } },
     daily_quote: { key: 'daily_quote', value: { text: 'Hello' } },
@@ -38,6 +43,14 @@ const state: {
 
 const createRbacBuilder = (table: string) => {
   const filters: Record<string, any> = {};
+  const row = () => {
+    if (table === 'user_roles') return { role: roles[String(filters.user_id)] };
+    if (table === 'profiles') return { id: filters.id, account_status: 'active' };
+    if (table === 'admin_auth_sessions' && filters.auth_session_id === ADMIN_SESSION_ID) {
+      return { id: 'admin-session-record', user_id: 'admin-1', revoked_at: state.sessionRevoked ? new Date().toISOString() : null };
+    }
+    return null;
+  };
 
   const builder: any = {
     select: () => builder,
@@ -48,14 +61,8 @@ const createRbacBuilder = (table: string) => {
     order: () => builder,
     limit: () => builder,
     in: () => builder,
-    maybeSingle: async () => ({
-      data: table === 'user_roles' ? { role: roles[String(filters.user_id)] } : null,
-      error: null,
-    }),
-    single: async () => ({
-      data: table === 'user_roles' ? { role: roles[String(filters.user_id)] } : null,
-      error: null,
-    }),
+    maybeSingle: async () => ({ data: row(), error: null }),
+    single: async () => ({ data: row(), error: null }),
     then: (onFulfilled: any, onRejected: any) =>
       Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected),
   };
@@ -74,7 +81,7 @@ const fakeSupabase = {
     },
   },
   from: (table: string) =>
-    table === 'user_roles' ? createRbacBuilder(table) : createAdminBuilder(table),
+    ['user_roles', 'profiles', 'admin_auth_sessions'].includes(table) ? createRbacBuilder(table) : createAdminBuilder(table),
 };
 
 const createAdminBuilder = (table: string) => {
@@ -218,6 +225,7 @@ after(() => {
 beforeEach(() => {
   state.writes = [];
   state.reads = [];
+  state.sessionRevoked = false;
 });
 
 test('anonymous callers cannot modify XP rules', async () => {
@@ -265,7 +273,7 @@ test('a missing or invalid token is rejected', async () => {
 
 test('authorized administrators can update XP rules with a validated payload', async () => {
   const response = await request('PUT', '/api/v1/app-builder/xp-rules', {
-    token: 'admin-token',
+    token: ADMIN_TOKEN,
     body: { per_correct_answer: 10, profile_completion: 50 },
   });
 
@@ -278,15 +286,26 @@ test('authorized administrators can update XP rules with a validated payload', a
   });
 });
 
+test('a revoked application session cannot use an otherwise active Admin role', async () => {
+  state.sessionRevoked = true;
+  const response = await request('PUT', '/api/v1/app-builder/xp-rules', {
+    token: ADMIN_TOKEN,
+    body: { per_correct_answer: 10 },
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal(state.writes.length, 0);
+});
+
 test('invalid XP rule payloads are rejected without a write', async () => {
   const stringValue = await request('PUT', '/api/v1/app-builder/xp-rules', {
-    token: 'admin-token',
+    token: ADMIN_TOKEN,
     body: { per_correct_answer: 'lots' },
   });
   assert.equal(stringValue.status, 400);
 
   const nested = await request('PUT', '/api/v1/app-builder/xp-rules', {
-    token: 'admin-token',
+    token: ADMIN_TOKEN,
     body: { nested: { deep: true } } as unknown,
   });
   assert.equal(nested.status, 400);
@@ -308,7 +327,7 @@ test('students cannot delete banners and admins can', async () => {
   assert.equal(state.writes.length, 0);
 
   const admin = await request('DELETE', '/api/v1/app-builder/banners/banner-1', {
-    token: 'admin-token',
+    token: ADMIN_TOKEN,
   });
   assert.equal(admin.status, 200);
   assert.equal(state.writes.length, 1);
@@ -334,7 +353,7 @@ test('anonymous callers cannot retrieve the full app configuration dump', async 
 
 test('administrators can read the full configuration dump', async () => {
   const response = await request('GET', '/api/v1/app-builder/configs', {
-    token: 'admin-token',
+    token: ADMIN_TOKEN,
   });
 
   assert.equal(response.status, 200);

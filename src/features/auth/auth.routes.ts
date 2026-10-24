@@ -14,6 +14,7 @@ router.post('/admin/verify-2fa', loginLimit, authController.verify2FA);
 
 // Protected Routes
 router.use(requireAuth);
+router.post('/logout', authController.logout);
 router.post('/save-device', authController.saveDeviceInfo);
 router.get('/profile', authController.getProfile);
 router.get('/permissions', authController.getRoleAndPermissions);

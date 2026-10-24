@@ -18,6 +18,8 @@ import type { AddressInfo } from 'node:net';
 type Row = Record<string, any>;
 
 const QUOTA_RESET_AT = '2026-10-22T18:00:00.000Z';
+const ADMIN_SESSION_ID = '00000000-0000-4000-8000-000000000001';
+const ADMIN_TOKEN = `e30.${Buffer.from(JSON.stringify({ session_id: ADMIN_SESSION_ID })).toString('base64url')}.test`;
 
 const state: {
   examPapers: Row[];
@@ -25,6 +27,8 @@ const state: {
   questions: Row[];
   attempts: Row[];
   roles: Row[];
+  profiles: Row[];
+  adminSessions: Row[];
   featureQuotas: Row[];
   quotaAllowed: boolean;
   access: Row;
@@ -34,6 +38,8 @@ const state: {
   questions: [],
   attempts: [],
   roles: [],
+  profiles: [],
+  adminSessions: [],
   featureQuotas: [],
   quotaAllowed: true,
   access: {
@@ -67,6 +73,8 @@ const createBuilder = (table: string) => {
     if (table === 'questions') return state.questions;
     if (table === 'exam_progress') return state.attempts;
     if (table === 'user_roles') return state.roles;
+    if (table === 'profiles') return state.profiles;
+    if (table === 'admin_auth_sessions') return state.adminSessions;
     if (table === 'feature_quotas') return state.featureQuotas;
     return [];
   };
@@ -144,11 +152,12 @@ const fakeSupabase = {
   auth: {
     getUser: async (token: string) => {
       if (token === 'token-student') return { data: { user: { id: 'user-1' } }, error: null };
-      if (token === 'token-admin') return { data: { user: { id: 'admin-1' } }, error: null };
+      if (token === ADMIN_TOKEN) return { data: { user: { id: 'admin-1' } }, error: null };
       return { data: { user: null }, error: { message: 'invalid token' } };
     },
   },
   rpc: async (name: string) => {
+    if (name === 'has_permission') return { data: true, error: null };
     if (name === 'get_user_access') return { data: { ...state.access }, error: null };
 
     if (name === 'consume_quota') {
@@ -215,6 +224,7 @@ const stub = (request: string, exports: Row) => {
 stub('../../config/supabase', { supabase: fakeSupabase });
 stub('../../config/supabaseAdmin', { supabaseAdmin: fakeSupabase });
 stub('../../config/supabaseAuth', { supabaseAuth: fakeSupabase });
+stub('../../config/userSupabase', { createUserSupabaseClient: () => fakeSupabase });
 stub('../../config/firebaseAdmin', {
   messaging: { sendEachForMulticast: async () => ({ successCount: 0, failureCount: 0 }) },
 });
@@ -261,6 +271,8 @@ beforeEach(() => {
     { user_id: 'user-1', role: 'student', is_active: true },
     { user_id: 'admin-1', role: 'admin', is_active: true },
   ];
+  state.profiles = [{ id: 'admin-1', account_status: 'active' }];
+  state.adminSessions = [{ id: 'session-record-1', user_id: 'admin-1', auth_session_id: ADMIN_SESSION_ID, revoked_at: null }];
   state.featureQuotas = [
     { feature: 'exam_start', title_bn: 'পরীক্ষা শুরু', title_en: 'Exam start', free_daily_limit: 3, is_enabled: true },
     { feature: 'ai_message', title_bn: 'এআই', title_en: 'AI message', free_daily_limit: 0, is_enabled: false },
@@ -360,7 +372,7 @@ test('admin access endpoints reject an ordinary student token', async () => {
 });
 
 test('admin access endpoints accept an administrator token', async () => {
-  const response = await get('/api/v1/admin/access/quotas', 'token-admin');
+  const response = await get('/api/v1/admin/access/quotas', ADMIN_TOKEN);
   const body = await response.json();
 
   assert.equal(response.status, 200);

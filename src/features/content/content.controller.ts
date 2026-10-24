@@ -75,6 +75,7 @@ export const bulkCreateQuestions = catchAsync(async (req: AuthReq, res: Response
 export const updateQuestion = catchAsync(async (req: AuthReq, res: Response) => {
   const result = await contentService.updateQuestion(req.params.id, req.body, {
     role: req.userRole,
+    userId: req.user?.id,
   });
   sendResponse(res, { statusCode: 200, success: true, message: 'Question updated', data: result });
 });
@@ -149,6 +150,6 @@ export const getQuestionsBank = catchAsync(async (req: Request, res: Response) =
 });
 
 export const hardDeleteQuestion = catchAsync(async (req: Request, res: Response) => {
-  await contentService.hardDeleteQuestion(req.params.id);
+  await contentService.hardDeleteQuestion(req.params.id, (req as any).user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Question permanently deleted' });
 });

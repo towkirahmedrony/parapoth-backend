@@ -2,6 +2,8 @@ import { Router } from 'express';
 import * as SystemController from './system.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import { requirePermission } from '../../middlewares/requirePermission';
+import { PERMISSIONS } from '../../middlewares/authorization';
 
 const router = Router();
 
@@ -18,7 +20,7 @@ router.get('/configs/:key', SystemController.getAppConfigs);
 // ==========================================
 // Admin guarded routes
 // ==========================================
-const adminGuard = [requireAuth, rbacGuard(['admin', 'super_admin'])];
+const adminGuard = [requireAuth, rbacGuard(['admin', 'super_admin']), requirePermission(PERMISSIONS.SETTINGS_MANAGE)];
 
 router.post('/request-otp', adminGuard, SystemController.requestAdminOTP);
 
@@ -40,7 +42,7 @@ router.patch('/emergency-flags/:key', adminGuard, SystemController.toggleEmergen
 router.get('/support-tickets', adminGuard, SystemController.getSupportTickets);
 router.patch('/support-tickets/:id', adminGuard, SystemController.updateSupportTicket);
 
-router.get('/audit-logs', adminGuard, SystemController.getAuditLogs);
+router.get('/audit-logs', requireAuth, rbacGuard(['super_admin']), SystemController.getAuditLogs);
 
 router.get('/alerts', adminGuard, SystemController.getAdminAlerts);
 router.patch('/alerts/:id/resolve', adminGuard, SystemController.resolveAdminAlert);

@@ -2,6 +2,8 @@ import { Router } from 'express';
 import * as MediaController from './media.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import { requirePermission } from '../../middlewares/requirePermission';
+import { PERMISSIONS } from '../../middlewares/authorization';
 
 const router = Router();
 
@@ -14,15 +16,15 @@ router.post('/', MediaController.saveMedia);
 
 // Asset Management
 router.get('/', MediaController.getMediaAssets);
-router.get('/trash', rbacGuard(['admin']), MediaController.getTrashAssets);
-router.get('/unused', rbacGuard(['admin']), MediaController.scanUnusedMedia);
+router.get('/trash', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.getTrashAssets);
+router.get('/unused', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.scanUnusedMedia);
 
 // Updates
-router.put('/:id', rbacGuard(['admin']), MediaController.updateMedia); // নতুন রাউট
+router.put('/:id', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.updateMedia); // নতুন রাউট
 
 // Actions (Soft Delete, Restore, Force Delete)
-router.post('/soft-delete', rbacGuard(['admin']), MediaController.softDeleteMediaAssets);
-router.post('/restore', rbacGuard(['admin']), MediaController.restoreMediaAssets);
-router.post('/delete', rbacGuard(['admin']), MediaController.forceDeleteMediaAssets);
+router.post('/soft-delete', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.softDeleteMediaAssets);
+router.post('/restore', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.restoreMediaAssets);
+router.post('/delete', rbacGuard(['admin']), requirePermission(PERMISSIONS.QUESTIONS_MANAGE), MediaController.forceDeleteMediaAssets);
 
 export default router;

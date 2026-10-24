@@ -43,11 +43,15 @@ export const QUESTION_STATUSES = [
 ] as const;
 
 /** Roles allowed to publish, activate or otherwise moderate questions. */
-export const PRIVILEGED_CONTENT_ROLES = ['admin', 'moderator'] as const;
+export const PRIVILEGED_CONTENT_ROLES = ['super_admin', 'admin', 'moderator'] as const;
 
 export const isPrivilegedContentRole = (role?: string | null): boolean =>
   typeof role === 'string' &&
   (PRIVILEGED_CONTENT_ROLES as readonly string[]).includes(role);
+
+export const canEditQuestion = (role: string | null | undefined, userId: string | null | undefined, ownerId: string | null | undefined): boolean =>
+  isPrivilegedContentRole(role) ||
+  ((role === 'editor' || role === 'teacher') && Boolean(userId && ownerId && userId === ownerId));
 
 type AnyObject = Record<string, unknown>;
 

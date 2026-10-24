@@ -1,6 +1,7 @@
 import { supabase } from '../../config/supabase';
 import { supabaseAdmin } from '../../config/supabaseAdmin';
 import { supabaseAuth } from '../../config/supabaseAuth';
+import { createUserSupabaseClient } from '../../config/userSupabase';
 import { Profile } from './auth.types';
 import crypto from 'crypto';
 
@@ -26,6 +27,11 @@ const withoutSensitiveSettings = (profile: Record<string, any> | null): Profile 
 };
 
 export const authService = {
+  async revokeApplicationSession(accessToken: string): Promise<void> {
+    const { error } = await createUserSupabaseClient(accessToken).rpc('revoke_current_admin_auth_session');
+    if (error) throw new Error('Application session revocation failed');
+  },
+
   async getProfile(userId: string): Promise<Profile> {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (error) throw new Error(`Profile fetch error: ${error.message}`);

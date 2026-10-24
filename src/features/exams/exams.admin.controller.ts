@@ -14,12 +14,12 @@ export const getExamDetails = catchAsync(async (req: Request, res: Response) => 
 });
 
 export const deleteExam = catchAsync(async (req: Request, res: Response) => {
-  const result = await ExamAdminService.deleteExam(req.params.id);
+  const result = await ExamAdminService.deleteExam(req.params.id, (req as any).user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Exam deleted', data: result });
 });
 
 export const togglePublish = catchAsync(async (req: Request, res: Response) => {
-  const result = await ExamAdminService.togglePublish(req.params.id);
+  const result = await ExamAdminService.togglePublish(req.params.id, (req as any).user?.id);
   sendResponse(res, { statusCode: 200, success: true, message: 'Status updated', data: result });
 });
 
@@ -87,7 +87,7 @@ export const getEligibleQuestions = catchAsync(async (req: Request, res: Respons
 
 export const punishUser = catchAsync(async (req: Request, res: Response) => {
   const adminId = (req as any).user?.id;
-  const result = await ExamAdminService.punishUser(req.body, adminId);
+  const result = await ExamAdminService.punishUser(req.body, adminId, (req as any).accessToken);
   sendResponse(res, {
     statusCode: 200,
     success: true,

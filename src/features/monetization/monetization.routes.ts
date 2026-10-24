@@ -5,12 +5,14 @@ import * as monetizationController from './monetization.controller';
 // (যদি আপনার ফাইলে default export থাকে, তবে ব্র্যাকেট {} সরিয়ে দেবেন)
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import { requirePermission } from '../../middlewares/requirePermission';
+import { PERMISSIONS } from '../../middlewares/authorization';
 
 const router = Router();
 
 // এই রাউটগুলো মূলত এডমিনদের জন্য
 router.use(requireAuth);
-router.use(rbacGuard(['admin'])); 
+router.use(rbacGuard(['admin']), requirePermission(PERMISSIONS.QUOTAS_MANAGE));
 
 // Plans
 router.route('/plans')

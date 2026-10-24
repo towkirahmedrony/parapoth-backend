@@ -2,6 +2,8 @@ import { Router } from 'express';
 import * as financeController from './finance.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import { requirePermission } from '../../middlewares/requirePermission';
+import { PERMISSIONS } from '../../middlewares/authorization';
 
 const router = Router();
 
@@ -16,7 +18,7 @@ router.post('/payments/claim', requireAuth, financeController.submitPaymentClaim
 // 💻 ADMIN PANEL ROUTES (Protected)
 // ==========================================
 // Apply admin guards for the routes below
-const adminMiddleware = [requireAuth, rbacGuard(['admin', 'finance'])];
+const adminMiddleware = [requireAuth, rbacGuard(['admin']), requirePermission(PERMISSIONS.QUOTAS_MANAGE)];
 
 // Coin Economy Dashboard
 router.get('/coins/stats', adminMiddleware, financeController.getCoinEconomyStats);

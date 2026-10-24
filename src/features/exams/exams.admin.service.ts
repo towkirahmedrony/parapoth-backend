@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
+import { createUserSupabaseClient } from '../../config/userSupabase';
 import logger from '../../lib/utils/logger';
 import { AutoFetchDTO, PunishUserDTO } from './exams.types';
 import { ATTEMPT_STATUS, MINUTE_MS } from './exam.timing';
@@ -17,6 +18,17 @@ type AnyObject = Record<string, any>;
 
 const RECOVER_MIN_MINUTES = 1;
 const RECOVER_MAX_MINUTES = 60;
+
+const auditExamAction = async (actorId: string | undefined, action: string, examId: string) => {
+  const { error } = await supabase.from('audit_logs').insert({
+    user_id: actorId ?? null,
+    action,
+    target_table: 'exam_papers',
+    target_id: examId,
+    details: {},
+  });
+  if (error) logger.error('[security-audit] exam event could not be recorded');
+};
 
 /** Admin-facing error carrying the HTTP status the handler should return. */
 class ExamAdminError extends Error {
@@ -143,9 +155,10 @@ export class ExamAdminService {
     return data;
   }
 
-  static async deleteExam(id: string) {
+  static async deleteExam(id: string, adminId?: string) {
     const { data, error } = await supabase.from('exam_papers').delete().eq('id', id).select();
     if (error) throw new Error(error.message);
+    if (data?.length) await auditExamAction(adminId, 'exam.deleted', id);
     return data;
   }
 
@@ -155,7 +168,7 @@ export class ExamAdminService {
    * unauthorized paper cannot enter the published catalog. This is the ONLY
    * path that may set is_published to true.
    */
-  static async togglePublish(id: string) {
+  static async togglePublish(id: string, adminId?: string) {
     const exam = await ExamAdminService.getExamDetails(id);
 
     if (!exam) throw new Error('Exam not found');
@@ -188,6 +201,7 @@ export class ExamAdminService {
       .select()
       .single();
     if (error) throw new Error(error.message);
+    await auditExamAction(adminId, nextPublished ? 'exam.published' : 'exam.unpublished', id);
     return data;
   }
 
@@ -553,7 +567,7 @@ export class ExamAdminService {
    * previously zero every result the user ever recorded. Unknown actions are a
    * client error rather than a silent no-op.
    */
-  static async punishUser(payload: PunishUserDTO & { exam_id?: string }, adminId?: string) {
+  static async punishUser(payload: PunishUserDTO & { exam_id?: string }, adminId?: string, accessToken?: string) {
     const userId = typeof payload?.userId === 'string' ? payload.userId.trim() : '';
 
     if (!userId) {
@@ -593,20 +607,25 @@ export class ExamAdminService {
         affected: data.length,
       });
 
+      const { error: auditError } = await supabase.from('audit_logs').insert({
+        user_id: adminId ?? null,
+        action: 'exam_history.zero_marks',
+        target_table: 'exam_history',
+        target_id: userId,
+        details: { exam_id: examId, affected_rows: data.length },
+      });
+      if (auditError) logger.error('[security-audit] exam result action could not be recorded');
+
       return { success: true, action, userId, examId, affected: data.length };
     }
 
-    if (action === 'ban_device') {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({ account_status: 'suspended' })
-        .eq('id', userId)
-        .select('id');
-
-      if (error) throw new Error(error.message);
-      if (!data || data.length === 0) {
-        throw new ExamAdminError('User not found', 404);
-      }
+    if (action === 'suspend_account') {
+      if (!accessToken) throw new ExamAdminError('Authorization session unavailable', 401);
+      const { error } = await createUserSupabaseClient(accessToken).rpc('set_user_account_status', {
+        p_target_user_id: userId,
+        p_status: 'suspended',
+      });
+      if (error) throw new ExamAdminError('Account status change was not authorized', 403);
 
       logger.warn('[exam-admin] suspended user account', { adminId: adminId ?? null, userId });
 

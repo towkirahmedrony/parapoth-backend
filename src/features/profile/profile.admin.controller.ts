@@ -36,11 +36,11 @@ export const getSecurityDetails = catchAsync(async (req: Request, res: Response)
   sendResponse(res, { statusCode: 200, success: true, message: 'Security details fetched successfully', data });
 });
 
-export const terminateSession = catchAsync(async (req: Request, res: Response) => {
+export const removeTrustedDevice = catchAsync(async (req: Request, res: Response) => {
   const adminId = (req as any).user.id;
   const { sessionId } = req.params;
-  await AdminProfileService.terminateSession(adminId, sessionId);
-  sendResponse(res, { statusCode: 200, success: true, message: 'Session terminated successfully' });
+  await AdminProfileService.removeTrustedDevice(adminId, sessionId);
+  sendResponse(res, { statusCode: 200, success: true, message: 'Trusted device removed successfully' });
 });
 
 export const toggle2FA = catchAsync(async (req: Request, res: Response) => {

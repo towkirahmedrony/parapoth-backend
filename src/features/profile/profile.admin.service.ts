@@ -83,7 +83,7 @@ export const getAdminPerformance = async (adminId: string, timeframe: string) =>
 
 export const getSecurityData = async (adminId: string) => {
   const [sessionsRes, loginsRes] = await Promise.all([
-    supabase.from('admin_sessions').select('*').eq('admin_id', adminId),
+    supabase.from('admin_sessions').select('id, is_2fa_verified, last_active').eq('admin_id', adminId),
     supabase.from('admin_login_history').select('*').eq('admin_id', adminId).order('login_at', { ascending: false }).limit(10)
   ]);
 
@@ -91,12 +91,12 @@ export const getSecurityData = async (adminId: string) => {
   if (loginsRes.error) throw loginsRes.error;
 
   return {
-    activeSessions: sessionsRes.data,
+    trustedDevices: sessionsRes.data,
     loginHistory: loginsRes.data,
   };
 };
 
-export const terminateSession = async (adminId: string, sessionId: string) => {
+export const removeTrustedDevice = async (adminId: string, sessionId: string) => {
   const { error } = await supabase
     .from('admin_sessions')
     .delete()

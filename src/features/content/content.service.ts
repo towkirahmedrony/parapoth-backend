@@ -1,8 +1,19 @@
 import { randomUUID } from 'crypto';
 import { supabase } from '../../config/supabase';
 import { CurriculumNode, QuestionPayload, ComprehensionPayload, NodeType, AuditFilterParams } from './content.types';
-import { buildQuestionContentHash, decideQuestionWrite } from './question.policy';
+import { buildQuestionContentHash, canEditQuestion, decideQuestionWrite, isPrivilegedContentRole } from './question.policy';
 import { buildIdMatchClause, joinOrClauses, normalizeSearchTerm } from '../../lib/utils/search';
+
+const writeContentAudit = async (actorId: string, action: string, targetId: string) => {
+  const { error } = await supabase.from('audit_logs').insert({
+    user_id: actorId,
+    action,
+    target_table: 'questions',
+    target_id: targetId,
+    details: {},
+  });
+  if (error) console.error('[security-audit] content event could not be recorded');
+};
 
 export const getUserAccess = async (userId: string) => {
   const { data, error } = await supabase.rpc('get_user_access', { p_user_id: userId });
@@ -297,7 +308,7 @@ export const saveSmartQuestion = async (
 export const updateQuestion = async (
   id: string,
   questionData: Partial<QuestionPayload>,
-  options: { role?: string | null } = {}
+  options: { role?: string | null; userId?: string | null } = {}
 ) => {
   const { payload } = decideQuestionWrite({
     role: options.role,
@@ -307,6 +318,19 @@ export const updateQuestion = async (
 
   if (Object.keys(payload).length === 0) {
     throw new Error('No editable fields provided for update');
+  }
+
+  const privileged = isPrivilegedContentRole(options.role);
+  if (!privileged) {
+    if (!options.userId) throw new Error('Question not found');
+    const { data: ownedQuestion, error: ownershipError } = await supabase
+      .from('questions')
+      .select('created_by')
+      .eq('id', id)
+      .maybeSingle();
+    if (ownershipError || !canEditQuestion(options.role, options.userId, ownedQuestion?.created_by)) {
+      throw new Error('Question not found');
+    }
   }
 
   if (
@@ -323,7 +347,9 @@ export const updateQuestion = async (
     payload.content_hash = buildQuestionContentHash({ ...(existingData ?? {}), ...payload });
   }
 
-  const { data, error } = await supabase.from('questions').update(payload).eq('id', id).select().single();
+  let updateQuery = supabase.from('questions').update(payload).eq('id', id);
+  if (!privileged && options.userId) updateQuery = updateQuery.eq('created_by', options.userId);
+  const { data, error } = await updateQuery.select().single();
   if (error) throw new Error(error.message);
   return data;
 };
@@ -354,6 +380,7 @@ export const reviewQuestion = async (id: string, status: 'approved' | 'rejected'
     .select()
     .single();
   if (error) throw new Error(error.message);
+  await writeContentAudit(adminId, `question.${status}`, id);
   return data;
 };
 
@@ -442,6 +469,7 @@ export const updateQuestionAuditStatus = async (id: string, status: string, note
     if (status === 'approved') { updateData.approved_by = adminId; updateData.approved_at = new Date().toISOString(); }
     const { data, error } = await supabase.from('questions').update(updateData).eq('id', id).select().single();
     if (error) throw new Error(error.message);
+    await writeContentAudit(adminId, `question.status.${status}`, id);
     return data;
 };
 
@@ -487,8 +515,9 @@ export const getFilteredQuestions = async (filters: any, page: number = 1, limit
   };
 };
 
-export const hardDeleteQuestion = async (id: string) => {
+export const hardDeleteQuestion = async (id: string, adminId: string) => {
   const { error } = await supabase.from('questions').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  await writeContentAudit(adminId, 'question.hard_deleted', id);
   return true;
 };

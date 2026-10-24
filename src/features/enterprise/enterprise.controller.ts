@@ -10,13 +10,13 @@ export const getStaffList = catchAsync(async (req: Request, res: Response) => {
 
 export const assignStaffRole = catchAsync(async (req: Request, res: Response) => {
   const { email, role } = req.body;
-  const result = await enterpriseService.assignRoleToUser(email, role);
+  const result = await enterpriseService.assignRoleToUser(email, role, (req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Staff role assigned successfully', data: result });
 });
 
 export const removeStaffAccess = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;
-  await enterpriseService.revokeStaffAccess(id);
+  await enterpriseService.revokeStaffAccess(id, (req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Staff access revoked successfully' });
 });
 
@@ -27,23 +27,23 @@ export const getPermissions = catchAsync(async (req: Request, res: Response) => 
 
 export const togglePermission = catchAsync(async (req: Request, res: Response) => {
   const { permId, role } = req.body;
-  const updated = await enterpriseService.toggleRolePermission(permId, role);
+  const updated = await enterpriseService.toggleRolePermission(permId, role, (req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Permission toggled successfully', data: updated });
 });
 
 export const getActiveSessions = catchAsync(async (req: Request, res: Response) => {
-  const sessions = await enterpriseService.fetchActiveSessions();
+  const sessions = await enterpriseService.fetchActiveSessions((req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Active sessions retrieved', data: sessions });
 });
 
 export const revokeSession = catchAsync(async (req: Request, res: Response) => {
   const { id } = req.params;
-  await enterpriseService.revokeAdminSession(id);
+  await enterpriseService.revokeAdminSession(id, (req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Session revoked successfully' });
 });
 
 export const getSecurityAuditLogs = catchAsync(async (req: Request, res: Response) => {
-  const logs = await enterpriseService.fetchSecurityLogs();
+  const logs = await enterpriseService.fetchSecurityLogs((req as any).accessToken);
   sendResponse(res, { statusCode: 200, success: true, message: 'Security audit logs retrieved', data: logs });
 });
 

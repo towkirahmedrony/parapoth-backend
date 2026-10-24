@@ -25,6 +25,17 @@ const getClientIp = (req: Request): string => {
 };
 
 export const authController = {
+  async logout(req: Request, res: Response) {
+    const accessToken = (req as any).accessToken as string | undefined;
+    if (!accessToken) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      await authService.revokeApplicationSession(accessToken);
+      return res.status(200).json({ success: true });
+    } catch {
+      return res.status(503).json({ error: 'Unable to revoke the application session' });
+    }
+  },
+
   async getProfile(req: Request, res: Response) {
     try {
       const userId = (req as any).user?.id; 

@@ -3,6 +3,7 @@ import catchAsync from '../../lib/utils/catchAsync';
 import sendResponse from '../../lib/utils/response';
 import * as financeService from './finance.service';
 import { parseLanguage } from '../../lib/utils/language';
+import { recordAdminAudit } from '../../lib/utils/adminAudit';
 
 // --- User App Controllers ---
 
@@ -40,6 +41,7 @@ export const getParsers = catchAsync(async (req: Request, res: Response) => {
 export const updateParser = catchAsync(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const parser = await financeService.updateParser(id, req.body);
+  await recordAdminAudit((req as any).user?.id, 'finance.parser.update', 'payment_parsers', String(id));
   sendResponse(res, { statusCode: 200, success: true, message: 'Payment parser updated successfully', data: parser });
 });
 
@@ -56,6 +58,7 @@ export const getUnclaimedSmsLogs = catchAsync(async (req: Request, res: Response
 export const approvePayment = catchAsync(async (req: Request, res: Response) => {
   const requestId = req.params.id;
   const result = await financeService.approvePayment(requestId);
+  await recordAdminAudit((req as any).user?.id, 'finance.payment.approve', 'payment_requests', requestId);
   sendResponse(res, { statusCode: 200, success: true, message: 'Payment approved successfully', data: result });
 });
 
@@ -63,6 +66,7 @@ export const rejectPayment = catchAsync(async (req: Request, res: Response) => {
   const requestId = req.params.id;
   const { reason } = req.body;
   const result = await financeService.rejectPayment(requestId, reason);
+  await recordAdminAudit((req as any).user?.id, 'finance.payment.reject', 'payment_requests', requestId);
   sendResponse(res, { statusCode: 200, success: true, message: 'Payment rejected successfully', data: result });
 });
 

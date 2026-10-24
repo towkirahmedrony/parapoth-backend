@@ -7,17 +7,19 @@ import {
 } from './exams.admin.controller';
 import { requireAuth } from '../../middlewares/requireAuth';
 import { rbacGuard } from '../../middlewares/rbacGuard';
+import { requirePermission } from '../../middlewares/requirePermission';
+import { PERMISSIONS } from '../../middlewares/authorization';
 
 const router = Router();
 
 // প্রোডাকশনে যাওয়ার সময় এই মিডলওয়্যারগুলো আনকমেন্ট করে দেবেন
-router.use(requireAuth, rbacGuard(['admin'])); 
+router.use(requireAuth, rbacGuard(['admin']), requirePermission(PERMISSIONS.EXAMS_MANAGE));
 
 // জেনারেল রাউটস
 router.get('/', getAllExams);
 router.post('/', createExam);
 router.post('/auto-fetch', autoFetchQuestions);
-router.post('/punish', punishUser);
+router.post('/punish', requirePermission(PERMISSIONS.USER_MANAGE), punishUser);
 router.post('/recover-session', recoverSession);
 
 // Static paths must be registered before `/:id`, otherwise Express would treat

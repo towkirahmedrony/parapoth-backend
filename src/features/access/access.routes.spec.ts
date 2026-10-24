@@ -35,10 +35,14 @@ const QUOTA_STATUS = {
 const state: {
   rpcCalls: string[];
   roles: Row[];
+  profiles: Row[];
+  adminSessions: Row[];
   tokens: Record<string, { id: string } | null>;
 } = {
   rpcCalls: [],
   roles: [],
+  profiles: [],
+  adminSessions: [],
   tokens: {},
 };
 
@@ -47,6 +51,8 @@ const fakeSupabase = {
     let rows: Row[] = [];
 
     if (table === 'user_roles') rows = state.roles;
+    if (table === 'profiles') rows = state.profiles;
+    if (table === 'admin_auth_sessions') rows = state.adminSessions;
 
     const builder: any = {
       select: () => builder,
@@ -130,6 +136,8 @@ const layerNames = (router: any): string[] =>
 beforeEach(() => {
   state.rpcCalls.length = 0;
   state.roles = [];
+  state.profiles = [{ id: 'admin-1', account_status: 'active' }];
+  state.adminSessions = [{ id: 'session-record-1', user_id: 'admin-1', auth_session_id: '00000000-0000-4000-8000-000000000001', revoked_at: null }];
   state.tokens = { 'valid-admin': { id: 'admin-1' }, 'valid-user': { id: 'user-1' } };
 });
 
@@ -253,7 +261,7 @@ test('an ordinary user is denied every admin access operation', async () => {
 test('an administrator passes the admin guard', async () => {
   state.roles = [{ user_id: 'admin-1', role: 'admin', is_active: true }];
 
-  const req: Row = { user: { id: 'admin-1' }, headers: {}, body: {}, params: {}, query: {} };
+  const req: Row = { user: { id: 'admin-1' }, accessToken: 'verified-user-token', authSessionId: '00000000-0000-4000-8000-000000000001', headers: {}, body: {}, params: {}, query: {} };
   const res = createRes();
   let nextCalled = false;
 

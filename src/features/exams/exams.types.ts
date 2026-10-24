@@ -33,7 +33,7 @@ export interface AutoFetchDTO {
 
 export interface PunishUserDTO {
   userId: string;
-  action: 'zero_marks' | 'ban_device';
+  action: 'zero_marks' | 'suspend_account';
   /** Required for `zero_marks`: the action is scoped to one exam. */
   examId?: string;
   /** Snake-case alias accepted for compatibility with existing clients. */
