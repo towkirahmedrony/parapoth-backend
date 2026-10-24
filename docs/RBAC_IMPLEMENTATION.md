@@ -1,6 +1,6 @@
 # Porokh RBAC implementation and deployment guide
 
-**Status (2026-10-24):** coordinated source changes are prepared on `feature/rbac-hardening`; the forward-only migration is **not applied** to Supabase or production. No production role, policy, session, or application data was changed during this work.
+**Status (2026-10-24):** the coordinated source changes are on `main` in all three repositories. The forward-only migration was applied to the live ParaPoth Supabase project as migration version `20261024075947` (`canonical_rbac_hardening`). The application-level permission schema/mappings and security objects changed; user role assignments were not changed. There is still no Super Admin, by explicit instruction.
 
 ## Source of truth and canonical roles
 
@@ -34,7 +34,7 @@ These are explicit grants, not a role hierarchy. Super Admin's global override i
 
 `assign_user_role(uuid,text,boolean)` derives the actor from `auth.uid()`, validates the requested role and target, denies self-change, checks both the target's current and requested privileged roles, serializes assignments, records changes transactionally, invalidates tracked privileged sessions on a role change, and protects the last active Super Admin. Admin may assign/revoke only the approved lower-role set. A revocation downgrades the target to an active Student role rather than leaving the account without an active authorization record. Super Admin assignment/revocation requires Super Admin authority and the corresponding fixed permission.
 
-The live, privacy-preserving role-count snapshot taken for this work showed **0 Super Admin, 1 Admin, and 2 Student assignments**, with no inactive or unknown role values; the existing `role_permissions` mapping table was empty. No identity was selected or promoted. The migration intentionally has no public bootstrap endpoint. Because there is no existing Super Admin, the first one must be established as a controlled break-glass action by the Supabase project/database owner after approval:
+The privacy-preserving live role-count snapshot after migration remains **0 Super Admin, 1 Admin, and 2 Student assignments**, with no inactive or unknown role values. The migration seeded the permission map (15 Super Admin, 12 Admin, 3 Moderator, 1 Editor, 1 Teacher; no Student grants). No identity was selected or promoted. The migration intentionally has no public bootstrap endpoint. Because there is no existing Super Admin, the first one must be established as a controlled break-glass action by the Supabase project/database owner after approval:
 
 1. Review this migration and the live schema again; take a current backup and apply/test it in a disposable or staging project first.
 2. Obtain an explicit organizational decision naming the first Super Admin. Independently verify that exact account through an approved primary work contact and confirm its profile is active. Do not choose an arbitrary user or promote every Admin.
@@ -49,7 +49,7 @@ Prepared migration: [`20261024130000_canonical_rbac_hardening.sql`](../supabase/
 
 It is forward-only and transactional. It adds role checks and the active-role index; seeds canonical permissions without deleting existing mappings; creates `has_permission`, protected `assign_user_role` and `set_role_permission` RPCs; tightens `is_admin`; creates append-only-for-application-roles `security_audit_logs` and `admin_auth_sessions`; adds role/permission/audit mirror triggers; revokes direct role and audit-log DML from application/service API roles; and creates role-change, session registration/revocation, logout, and account-status RPCs. Security-definer functions use an empty fixed `search_path`, fully qualified objects, caller identity checks, and explicit execute grants. Audit records avoid tokens and copy no legacy `details` payload into the security log.
 
-The repository/live migration history discrepancy remains unresolved: the live project reported roughly 20 applied migrations, while the selected repositories did not contain a complete matching history (only a small subset of migration files was recoverable). Historical migrations were not fabricated or rewritten. Preserve Supabase's existing migration ledger; review the deployed schema against this new forward migration, and do not use database reset, blind replay, or destructive reconciliation. Production compatibility and SQL execution still require staging validation and explicit migration approval.
+The repository/live migration history discrepancy remains unresolved: before deployment the live project had 21 applied migrations, while the selected repositories did not contain a complete matching history (only a small subset of migration files was recoverable). The RBAC migration is now recorded as version `20261024075947`, making 22 entries. Historical migrations were not fabricated or rewritten. Preserve Supabase's existing migration ledger; do not use database reset, blind replay, or destructive reconciliation. Staging validation was not performed; production approval was explicitly given and the migration executed successfully.
 
 ## Session revocation
 
@@ -65,7 +65,7 @@ This is not cryptographic tamper-proof storage: a sufficiently privileged databa
 
 ## Registration and compatibility
 
-Live trigger metadata verified that `auth.users` inserts a profile and a profile trigger assigns an active `student` role. The trigger does not copy a client-supplied role. No production records were read by identity or changed. Existing valid assignments are preserved, unknown role values are not silently elevated, and a multi-active-role condition aborts the migration for manual review.
+Live trigger metadata verified that `auth.users` inserts a profile and a profile trigger assigns an active `student` role. The trigger does not copy a client-supplied role. No identity-level profile data was read; production role assignments remain unchanged. Existing valid assignments are preserved, unknown role values are not silently elevated, and a multi-active-role condition aborts the migration for manual review.
 
 ## Verification
 
@@ -85,10 +85,16 @@ npm run build
 
 The legacy admin-server source is under `parapoth-admin/clear` and has no independent package manifest. It was checked with TypeScript against the installed backend dependency/type toolchain using a temporary, untracked config. A successful type check does not replace a production build of that server.
 
-Database authorization/trigger behavior has not been executed against a disposable Postgres/Supabase instance in this task. Before rollout, use isolated test identities to verify grants, role assignment boundaries, last-Super-Admin safeguards, audit append-only behavior, account status, and session revocation. Never run those destructive tests against production identities.
+The migration ran successfully in production, and read-only catalog checks verified both new security tables have RLS enabled, the caller-authorized RPCs are security-definer with an empty fixed search path, authenticated callers can execute them, and `service_role` cannot. Post-deployment Supabase security advisors did not flag either new table as RLS-enabled-without-policy. Database authorization/trigger behavior was not exercised against a disposable Postgres/Supabase instance. Continue to use isolated test identities to verify role assignment boundaries, last-Super-Admin safeguards, append-only audit behavior, account status, and session revocation; never run destructive tests against production identities.
 
 ## Rollout and required environment
 
 Caller-scoped RPC clients require `SUPABASE_URL` and `SUPABASE_ANON_KEY` plus the verified request bearer token. Existing server-only service-role credentials remain backend-only and are not used by these authorization RPC clients. Do not expose them in the browser bundle.
 
-Safe order: review the generated diff and migration; stage code against a disposable/staging database; validate migration history and schema; test all six role paths and security cases; obtain explicit production migration approval; apply the migration through the established deployment process; deploy backend and admin/frontend changes; bootstrap the chosen first Super Admin as above; then run authenticated/unauthenticated production smoke tests without changing real user roles. Source-code completion or a pushed branch does not make RBAC active in production.
+## Post-deployment verification and remaining actions
+
+The migration is applied and recorded as `20261024075947`. Read-only checks verified the role assignments remain 1 Admin, 2 Students, and 0 Super Admins; the permission-map counts are present; both security tables have RLS enabled; and all seven caller-authorized RPCs have fixed empty `search_path`, authenticated execute grants, and no service-role execute grant. Backend CI completed successfully. Student frontend CI was still running at the last check; the admin repository returned no GitHub Actions run. The local backend test/build, admin build, student build, and legacy-server type check had passed before the `main` pushes.
+
+The security advisor reports existing project findings, including two pre-existing functions with mutable search paths and disabled leaked-password protection; these were not changed by this RBAC release. It also reports expected authenticated-executable SECURITY DEFINER RPC warnings—the new RPCs perform explicit caller/role checks and are not executable by `service_role`. Performance advice includes many unindexed foreign keys across the existing schema and two new session-table foreign keys; no additional index migration was included in this release.
+
+The first Super Admin bootstrap remains pending and must be a separate, owner-controlled operation after an explicit identity decision. No connected Render/Vercel hosting deployment was independently verified. Continue with isolated integration tests and authenticated/unauthenticated smoke tests, without changing real user roles, then select a Super Admin only through the documented approval process.
