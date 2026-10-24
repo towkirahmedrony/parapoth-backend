@@ -8,6 +8,7 @@ import { z } from 'zod';
  */
 export const PROFILE_SELF_EDITABLE_FIELDS = [
   'full_name',
+  'username',
   'phone_number',
   'bio',
   'avatar_url',
@@ -59,6 +60,12 @@ const nullablePhone = z
   .union([z.string().trim().regex(PHONE_PATTERN, 'Invalid phone number format'), z.null()])
   .optional();
 
+const normalizedUsername = z
+  .string()
+  .trim()
+  .transform((value) => value.toLowerCase())
+  .pipe(z.string().regex(/^[a-z0-9_]{3,20}$/, 'Username must be 3-20 lowercase letters, numbers, or underscores'));
+
 const addressSchema = z
   .record(
     z.union([
@@ -85,6 +92,7 @@ const addressSchema = z
 
 const profileFields = {
   full_name: z.string().trim().min(1, 'Full name is required').max(100).optional(),
+  username: normalizedUsername.optional(),
   phone_number: nullablePhone,
   bio: nullableText(500),
   avatar_url: z
@@ -128,12 +136,7 @@ const profileFields = {
 const selfSchema = z.object(profileFields);
 const adminSchema = z.object({
   ...profileFields,
-  username: z
-    .union([
-      z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_.-]+$/, 'Invalid username'),
-      z.null(),
-    ])
-    .optional(),
+  username: z.union([normalizedUsername, z.null()]).optional(),
 });
 
 type AllowlistedField = string;

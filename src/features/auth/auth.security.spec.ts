@@ -19,6 +19,7 @@ const db = {
   user_roles: [] as Row[],
   admin_sessions: [] as Row[],
   user_devices: [] as Row[],
+  profileQueryError: false,
 };
 
 const calls = {
@@ -52,6 +53,10 @@ const createBuilder = (table: string) => {
 
   const resolve = (mode: 'many' | 'single') => {
     const rows = rowsFor(table);
+
+    if (table === 'profiles' && db.profileQueryError) {
+      return { data: null, error: { message: 'database unavailable' } };
+    }
 
     if (inserted) {
       const stored = inserted.map((row) => {
@@ -257,6 +262,8 @@ beforeEach(() => {
     {
       id: 'admin-1',
       email: 'admin@example.com',
+      username: 'admin_1',
+      account_status: 'active',
       is_2fa_enabled: false,
       settings: {},
       full_name: 'Admin',
@@ -264,6 +271,8 @@ beforeEach(() => {
     {
       id: 'student-1',
       email: 'student@example.com',
+      username: 'student_1',
+      account_status: 'active',
       is_2fa_enabled: false,
       settings: {},
       full_name: 'Student',
@@ -271,6 +280,8 @@ beforeEach(() => {
     {
       id: 'admin-2fa',
       email: 'secure-admin@example.com',
+      username: 'secure_admin',
+      account_status: 'active',
       is_2fa_enabled: true,
       settings: { two_factor_secret: active2faSecret },
       full_name: 'Secure Admin',
@@ -283,6 +294,7 @@ beforeEach(() => {
   ];
   db.admin_sessions = [];
   db.user_devices = [];
+  db.profileQueryError = false;
   calls.signIn = [];
   calls.signOut = [];
   calls.generateLink = [];
@@ -312,6 +324,34 @@ test('H-05: invalid credentials are rejected', async () => {
 
   assert.equal(res.statusCode, 401);
   assert.equal(res.body.token, undefined);
+});
+
+test('username login verifies credentials server-side without returning the resolved email', async () => {
+  const res = await invoke(authController.usernameLogin, {
+    body: { username: '  STUDENT_1 ', password: 'correct-password' },
+    headers: {},
+    socket: {},
+  });
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.success, true);
+  assert.equal(res.body.session.access_token, 'real-access-token');
+  assert.equal('email' in res.body, false);
+  assert.equal(JSON.stringify(res.body).includes('student@example.com'), false);
+  assert.deepEqual(calls.signIn.at(-1), { email: 'student@example.com', password: 'correct-password' });
+});
+
+test('unknown usernames and incorrect passwords share the same public failure', async () => {
+  const unknown = await invoke(authController.usernameLogin, {
+    body: { username: 'missing_user', password: 'correct-password' }, headers: {}, socket: {},
+  });
+  const wrongPassword = await invoke(authController.usernameLogin, {
+    body: { username: 'student_1', password: 'wrong-password' }, headers: {}, socket: {},
+  });
+
+  assert.equal(unknown.statusCode, 401);
+  assert.deepEqual(unknown.body, wrongPassword.body);
+  assert.equal(JSON.stringify(unknown.body).includes('@'), false);
 });
 
 test('H-05: a client-supplied role cannot grant administrator access', async () => {
@@ -442,6 +482,26 @@ test('H-05: device registration uses the authenticated id, not the body', async 
 
   assert.equal(res.statusCode, 200);
   assert.equal(db.user_devices[0].user_id, 'admin-1');
+});
+
+test('protected operations reject a suspended profile despite a valid issued token', async () => {
+  db.profiles.find((profile) => profile.id === 'admin-1')!.account_status = 'suspended';
+  const req = { headers: { authorization: 'Bearer real-access-token' }, body: { account_status: 'active' } } as any;
+  const res = createRes();
+  let nextCalled = false;
+
+  await requireAuth(req, res, (() => { nextCalled = true; }) as any);
+
+  assert.equal(res.statusCode, 403);
+  assert.equal(nextCalled, false);
+  assert.equal(req.user, undefined);
+});
+
+test('protected operations fail closed when account status cannot be verified', async () => {
+  db.profileQueryError = true;
+  const res = await invoke(requireAuth, { headers: { authorization: 'Bearer real-access-token' } });
+
+  assert.equal(res.statusCode, 503);
 });
 
 test('H-05: privileged exam admin operations remain admin-gated', async () => {

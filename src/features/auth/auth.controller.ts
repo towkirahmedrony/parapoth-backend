@@ -79,6 +79,45 @@ export const authController = {
   },
 
   /**
+   * Username login resolves email only inside the trusted backend, then uses
+   * the same Supabase Auth password verification as email login. The response
+   * never includes the resolved email or profile data.
+   */
+  async usernameLogin(req: Request, res: Response) {
+    const username = typeof req.body?.username === 'string' ? req.body.username : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!username || !password) {
+      return res.status(401).json({ success: false, message: 'Invalid username or password' });
+    }
+
+    try {
+      const email = await authService.findActiveAccountEmailByUsername(username);
+      if (!email) {
+        return res.status(401).json({ success: false, message: 'Invalid username or password' });
+      }
+
+      const auth = await authService.authenticateWithPassword(email, password);
+      if (!auth?.session) {
+        return res.status(401).json({ success: false, message: 'Invalid username or password' });
+      }
+
+      return res.status(200).json({
+        success: true,
+        session: {
+          access_token: auth.session.access_token,
+          refresh_token: auth.session.refresh_token,
+          expires_at: auth.session.expires_at,
+          expires_in: auth.session.expires_in,
+          token_type: auth.session.token_type,
+        },
+      });
+    } catch {
+      return res.status(503).json({ success: false, message: 'Authentication is temporarily unavailable' });
+    }
+  },
+
+  /**
    * Administrator login.
    *
    * Identity is established ONLY by real credentials verified against Supabase

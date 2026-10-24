@@ -28,6 +28,25 @@ export const requireAuth = async (req: AuthReq, res: Response, next: NextFunctio
       return sendResponse(res, { statusCode: 401, success: false, message: 'Unauthorized: Invalid or expired token' });
     }
 
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('account_status')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (profileError) {
+      return sendResponse(res, { statusCode: 503, success: false, message: 'Account status could not be verified' });
+    }
+
+    if (!profile || profile.account_status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: 'Account access is unavailable',
+        data: null,
+        code: 'ACCOUNT_SUSPENDED',
+      });
+    }
+
     req.user = { id: user.id };
     // Retain only in request memory so privileged RPCs can verify auth.uid()
     // independently in Postgres. Never persist or log this token.

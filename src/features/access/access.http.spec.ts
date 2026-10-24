@@ -271,7 +271,10 @@ beforeEach(() => {
     { user_id: 'user-1', role: 'student', is_active: true },
     { user_id: 'admin-1', role: 'admin', is_active: true },
   ];
-  state.profiles = [{ id: 'admin-1', account_status: 'active' }];
+  state.profiles = [
+    { id: 'user-1', account_status: 'active' },
+    { id: 'admin-1', account_status: 'active' },
+  ];
   state.adminSessions = [{ id: 'session-record-1', user_id: 'admin-1', auth_session_id: ADMIN_SESSION_ID, revoked_at: null }];
   state.featureQuotas = [
     { feature: 'exam_start', title_bn: 'পরীক্ষা শুরু', title_en: 'Exam start', free_daily_limit: 3, is_enabled: true },

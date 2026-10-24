@@ -143,6 +143,21 @@ test('editable profile fields are allowed and sensitive fields are dropped', () 
   });
 });
 
+test('self-service username updates normalize case and strip privileged fields', () => {
+  const payload = buildProfileUpdatePayload({
+    username: '  Towkir_7 ',
+    account_status: 'active',
+    role: 'super_admin',
+  });
+
+  assert.deepEqual(payload, { username: 'towkir_7' });
+});
+
+test('self-service username updates reject unsupported characters and lengths', () => {
+  assert.throws(() => buildProfileUpdatePayload({ username: 'two-kir' }), ProfileValidationError);
+  assert.throws(() => buildProfileUpdatePayload({ username: 'ab' }), ProfileValidationError);
+});
+
 test('a profile update cannot change XP, coins, subscription or account status', async () => {
   await ProfileService.updateProfile('user-1', {
     full_name: 'New Name',

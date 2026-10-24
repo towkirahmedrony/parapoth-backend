@@ -123,6 +123,25 @@ export const authService = {
     return data;
   },
 
+  /** Resolve a normalized username only inside the trusted backend boundary. */
+  async findActiveAccountEmailByUsername(username: string): Promise<string | null> {
+    const normalized = username.trim().toLowerCase();
+    if (!/^[a-z0-9_]{3,20}$/.test(normalized)) return null;
+
+    const { data, error } = await supabaseAdmin
+      .from('profiles')
+      .select('email, account_status')
+      .eq('username', normalized)
+      .maybeSingle();
+
+    if (error) throw new Error('Username authentication lookup failed');
+    if (data?.account_status !== 'active' || typeof data?.email !== 'string' || !data.email) {
+      return null;
+    }
+
+    return data.email;
+  },
+
   /** Revokes a Supabase session that must not be used (e.g. pre-2FA login). */
   async revokeSession(accessToken: string): Promise<void> {
     if (!accessToken) return;
